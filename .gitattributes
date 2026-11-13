@@ -1,0 +1,15 @@
+# Keep Windows line endings consistent in docs; treat binaries as binary.
+*.md text
+*.rs text
+*.sh text eol=lf
+*.toml text
+*.yml text
+*.html text
+*.cast binary
+*.gif binary
+*.png binary
+*.mp4 binary
+*.webm binary
+*.ttf binary
+*.js binary
+*.css binary

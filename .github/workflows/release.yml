@@ -1,0 +1,254 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        # NOTE: expressions are NOT evaluated inside strategy blocks —
+        # artifact names are explicit per entry.
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: screendoc-x86_64-unknown-linux-gnu.tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: screendoc-aarch64-unknown-linux-gnu.tar.gz
+          # x86_64 macOS is CROSS-BUILT on the arm64 macos-latest runner:
+          # macos-13 (the only Intel Mac) is chronically starved in the
+          # runner queue and cannot be relied on to ever start. The SDK is
+          # two-arch, so clang links x86_64 objects on an arm64 host. The
+          # "Verify binary arch" step proves the artifact is really x86_64.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: screendoc-x86_64-apple-darwin.tar.gz
+            extra_targets: x86_64-apple-darwin
+            expect_arch: x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: screendoc-aarch64-apple-darwin.tar.gz
+            expect_arch: arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: screendoc-x86_64-pc-windows-msvc.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install toolchain
+        run: |
+          rustup toolchain install --profile minimal
+          rustup default stable
+
+      - name: Install cross target
+        if: matrix.extra_targets
+        run: rustup target add ${{ matrix.extra_targets }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Verify binary arch
+        if: runner.os == 'macOS' && matrix.expect_arch
+        run: |
+          BIN=target/${{ matrix.target }}/release/screendoc
+          lipo -info "$BIN"
+          archs=" $(lipo -archs "$BIN") "
+          case "$archs" in
+            *" ${{ matrix.expect_arch }} "*) echo "OK: artifact is ${{ matrix.expect_arch }}" ;;
+            *) echo "FAIL: got '$archs', expected ${{ matrix.expect_arch }}" >&2; exit 1 ;;
+          esac
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          BIN=target/${{ matrix.target }}/release/screendoc
+          mkdir -p pkg/screendoc
+          cp "$BIN" pkg/screendoc/screendoc
+          cp LICENSE pkg/screendoc/
+          (cd pkg && tar czf ../${{ matrix.artifact }} screendoc)
+          sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory pkg/screendoc | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/screendoc.exe" pkg/screendoc/screendoc.exe
+          Copy-Item LICENSE pkg/screendoc/
+          Compress-Archive -Path pkg/screendoc -DestinationPath $env:Artifacts
+          Set-Content -Path "$env:Artifacts.sha256" -Value (
+            ("{0}  {1}" -f (Get-FileHash $env:Artifacts).Hash.ToLower(), [IO.Path]::GetFileName($env:Artifacts))
+          )
+        env:
+          Artifacts: ${{ github.workspace }}/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.artifact }}.sha256
+
+  static-musl:
+    # Fully-static Linux binaries (no glibc dependency), for 64-bit and
+    # 32-bit hosts alike: x86_64, i686 (x86-32), armv7 (ARM-32
+    # hard-float), and aarch64 — the aarch64 static build is the one
+    # Termux (Android) users install, since Termux has no glibc.
+    # rust-lld links every target without host cross-gcc.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Every target links with rust-lld so the binary is fully static.
+          # (x86_64 is no exception: host-gcc linking on the x86_64 runner
+          # pulls in the glibc dynamic loader and `file` reports it as
+          # "dynamically linked", failing the Verify static step.)
+          - target: x86_64-unknown-linux-musl
+            artifact: screendoc-x86_64-linux-musl.tar.gz
+            rustflags: "-C target-feature=+crt-static -C linker=rust-lld"
+          - target: i686-unknown-linux-musl
+            artifact: screendoc-i686-linux-musl.tar.gz
+            rustflags: "-C target-feature=+crt-static -C linker=rust-lld"
+          - target: armv7-unknown-linux-musleabihf
+            artifact: screendoc-armv7-linux-musleabihf.tar.gz
+            rustflags: "-C target-feature=+crt-static -C linker=rust-lld"
+          - target: aarch64-unknown-linux-musl
+            artifact: screendoc-aarch64-linux-musl.tar.gz
+            rustflags: "-C target-feature=+crt-static -C linker=rust-lld"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain
+        run: |
+          rustup toolchain install --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+      - name: Build static
+        run: >
+          RUSTFLAGS="${{ matrix.rustflags }}"
+          cargo build --release --target ${{ matrix.target }}
+      - name: Verify static
+        run: |
+          BIN=target/${{ matrix.target }}/release/screendoc
+          file "$BIN"
+          # A Linux binary is fully static iff it has no PT_INTERP segment.
+          # (A static PIE — the x86_64 rust default — is fully static but
+          # `file` calls it "static-pie linked", not "statically linked",
+          # so the INTERP check is the authoritative test.)
+          if readelf -lW "$BIN" | grep -q INTERP; then
+            echo "ERROR: $BIN is dynamically linked (PT_INTERP present)" >&2
+            exit 1
+          fi
+          echo "OK: $BIN is fully static (no PT_INTERP segment)"
+      - name: Package
+        run: |
+          mkdir -p pkg/screendoc-static
+          cp target/${{ matrix.target }}/release/screendoc pkg/screendoc-static/
+          (cd pkg && tar czf ../${{ matrix.artifact }} screendoc-static)
+          sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.artifact }}.sha256
+
+  publish:
+    needs: [build, static-musl]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+
+      - name: Stage + combined SHA256SUMS
+        run: |
+          mkdir release && mv dist/*/* release/ 2>/dev/null || true
+          # The release's public signing key ships as an asset so anyone
+          # can verify the artifacts without needing the repo.
+          cp PGP-KEY.asc release/
+          (cd release && sha256sum *.tar.gz *.zip > SHA256SUMS)
+          for f in release/*; do echo "  - $f"; done
+
+      # Enterprise supply-chain control: when the repo secret
+      # SDOC_RELEASE_SIGNING_KEY (private GPG key) is configured, every
+      # artifact and the checksum manifest are detached-signed; `install.sh`
+      # and distro packagers can then verify the release.
+      - name: Sign artifacts (when SDOC_RELEASE_SIGNING_KEY is set)
+        env:
+          SDOC_RELEASE_SIGNING_KEY: ${{ secrets.SDOC_RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$SDOC_RELEASE_SIGNING_KEY" ] || { echo "no signing key configured — skipping"; exit 0; }
+          set -euo pipefail
+          gpg --batch --import <<<"$SDOC_RELEASE_SIGNING_KEY"
+          cd release
+          # gpg 2.4 (the runner's version) is broken for multi-file
+          # `--detach-sign`: it only signs the LAST input file, and even that
+          # signature fails verification (reproduced locally with gpg 2.4.8).
+          # Sign each file explicitly in a loop instead, armored, and
+          # self-verify every signature before publishing.
+          for f in *.tar.gz *.zip SHA256SUMS; do
+            gpg --batch --yes --pinentry-mode loopback --armor --digest-algo SHA512 \
+              --detach-sign "$f"
+          done
+          for f in *.tar.gz *.zip SHA256SUMS; do
+            gpg --batch --verify "$f.asc" "$f"
+          done
+          ls *.asc
+
+      - name: Publish release
+        run: |
+          set -euo pipefail
+          cd release
+          TAG="${GITHUB_REF#refs/tags/}"
+          [ -n "$TAG" ] && [ "$TAG" != "${GITHUB_REF}" ] \
+            || { echo "FAIL: GITHUB_REF=${GITHUB_REF} did not strip to a tag name" >&2; exit 1; }
+          echo "Publishing tag: $TAG"
+          # Idempotent: clear ALL prior releases for this tag (drafts included)
+          # from failed runs, so a re-run cannot trip over its own leftovers.
+          # The by-tag DELETE only clears non-drafts, so sweep by release id.
+          for RID in $(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            | python3 -c 'import json,sys; [print(r["id"]) for r in json.load(sys.stdin) if r["tag_name"]==sys.argv[1]]' "$TAG" 2>/dev/null || true); do
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${RID}" >/dev/null 2>&1 || true
+          done
+          # Create the release explicitly (and retry once: right after a tag
+          # re-point, the API can briefly reject the ref with 422
+          # "tag_name is not well-formed").
+          POST() {
+            gh api -X POST --input <(printf \
+              '{"draft":false,"prerelease":false,"tag_name":"%s","name":"screendoc %s","body":"See CHANGELOG.md"}' \
+              "$TAG" "$TAG") "repos/${GITHUB_REPOSITORY}/releases"
+          }
+          OUT=$(POST) || { sleep 10; OUT=$(POST); }
+          RELEASE_ID=$(printf '%s' "$OUT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          echo "Release id: $RELEASE_ID"
+          # Asset uploads must target uploads.github.com (the release's
+          # upload_url); POSTing to api.github.com/.../releases/{id}/assets
+          # returns 404.
+          for f in *; do
+            curl -sf -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@${f}" \
+              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${f}"
+            echo "uploaded ${f}"
+          done
+          gh api --jq .html_url "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

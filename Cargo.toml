@@ -1,0 +1,38 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+authors = ["Screendoc Contributors"]
+description = "screendoc - record your terminal, annotate it, and publish it as GIF/MP4/asciinema/web player"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = "deny"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.test]
+opt-level = 1
+
+# Valgrind sweep profile: unoptimized with full debug info. Valgrind is
+# designed for deterministic, unoptimized builds — optimized codegen (LTO,
+# register packing) makes it report memory it never actually reads. All
+# sweeps run against this profile so the findings are real, not codegen
+# artifacts; no suppressions are used.
+[profile.valgrind]
+inherits = "dev"
+strip = false
+panic = "abort"

@@ -1,0 +1,24 @@
+[package]
+name = "sdoc-render"
+description = "screendoc renderer: terminal frame rasterization, ffmpeg GIF/MP4 pipeline, local web player"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "=1.0.104"
+axum = "=0.8.9"
+image = "=0.25.10"
+rusttype = "=0.9.3"
+sdoc-core = { path = "../sdoc-core" }
+serde_json = "=1.0.154"
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros"] }
+vt100 = "=0.18.1"
+
+[dev-dependencies]

@@ -1,0 +1,68 @@
+# cargo-deny configuration (v0.20 schema).
+#
+# Enforced in CI (`.github/workflows/ci.yml`, job `audit`) alongside
+# `cargo audit` (advisories) and `scripts/license-audit.sh` (documentation).
+# This project pins exact dependency versions, so the graph is audited as a
+# whole rather than allowing floating requirements.
+
+[bans]
+# No version wildcards: every third-party requirement is pinned with `=`.
+# Path dependencies inside the workspace are exempt (crates.io cannot ship
+# path deps, so this only ever concerns this repo).
+wildcards = "deny"
+allow-wildcard-paths = true
+multiple-versions = "deny"
+
+# Documented duplicate-version exceptions — all transitive, each pulled in
+# by two third-party crates we do not control (pairs in Cargo.lock):
+#   bitflags     1.3.2 (winapi, Windows-only) + 2.13.2
+#   getrandom    0.2.17 (image) + 0.3.3 (ours) + 0.4.3 (newest transitive)
+#   miniz_oxide  0.8.9 + 0.9.1 (two image codec paths)
+#   nix          0.27.1 (serialport) + 0.28.0
+#   r-efi        5.3.0 + 6.0.0 (Windows target-specific consumers)
+#   rand_core    0.6.4 + 0.9.5
+#   thiserror(-impl) 1.x + 2.x
+#   wasi       0.11 + 0.14 (two target-specific consumers)
+#   windows-sys 0.52 + 0.61 (two Windows-sys lines in the tree)
+skip = [
+    { name = "bitflags", reason = "1.x required by winapi (Windows-only); 2.x is the current line" },
+    { name = "getrandom", reason = "0.2 (image), 0.3 (ours, pinned), 0.4 (newest transitive)" },
+    { name = "miniz_oxide", reason = "two image codec paths pin different major lines" },
+    { name = "nix", reason = "0.27 (serialport) vs 0.28 (newest transitive)" },
+    { name = "r-efi", reason = "Windows target-specific, two consumers" },
+    { name = "rand_core", reason = "0.6 and 0.9 required by different transitive trees" },
+    { name = "syn", reason = "2.x and 3.x lines coexist via different proc-macro dependencies" },
+    { name = "thiserror", reason = "1.x (older transitive) coexists with the pinned 2.x" },
+    { name = "thiserror-impl", reason = "proc-macro half of the thiserror 1.x/2.x pair" },
+    { name = "wasi", reason = "0.11 and 0.14 are required by different target-specific consumers" },
+    { name = "windows-sys", reason = "two Windows-sys lines coexist in the transitive tree" },
+]
+
+[licenses]
+# Allowlist — must stay in sync with scripts/license-audit.sh.
+#   MPL-2.0: audited `option-ext` case (file-scoped copyleft, one transitive
+#            dependency of `dirs`).
+#   NCSA:    permissive NCSA license; appears only as the dev-dependency
+#            `libfuzzer-sys` of `rav1e` and is never built into the binary.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-1.1",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+    "NCSA",
+    "Unlicense",
+]
+confidence-threshold = 0.8
+
+[sources]
+# Only crates.io: anything from an unknown registry or git source is a
+# supply-chain violation for this project.
+unknown-registry = "deny"
+unknown-git = "deny"

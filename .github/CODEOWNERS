@@ -1,0 +1,8 @@
+# Single-maintainer project: everything routes to the owner.
+* @GlobalTechInfo
+
+# Security and supply-chain files get extra attention.
+SECURITY.md @GlobalTechInfo
+LICENSES.md @GlobalTechInfo
+docs/LICENSES.md @GlobalTechInfo
+.github/ @GlobalTechInfo

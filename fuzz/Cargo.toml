@@ -1,0 +1,53 @@
+# Fuzz targets for screendoc's byte-stream and JSON parsers.
+#
+# These are NOT part of the main workspace (cargo-fuzz requires its own
+# workspace + nightly). From the repository root:
+#
+#   cargo +nightly install cargo-fuzz
+#   cargo +nightly fuzz run marker    # MarkerReader state machine
+#   cargo +nightly fuzz run cast      # v2/v3 cast parser
+#   cargo +nightly fuzz run redact    # ANSI-aware regex masking
+#   cargo +nightly fuzz run enc       # encrypted record format
+#
+# ASAN is enabled by cargo-fuzz by default; UBSAN is not available from
+# rustc yet. Fuzz corpora are git-ignored; confirmed crashes are pinned as
+# unit tests in the affected crate.
+
+[package]
+name = "screendoc-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.sdoc-core]
+path = "../crates/sdoc-core"
+
+[[bin]]
+name = "marker"
+path = "fuzz_targets/marker.rs"
+harness = false
+
+[[bin]]
+name = "cast"
+path = "fuzz_targets/cast.rs"
+harness = false
+
+[[bin]]
+name = "redact"
+path = "fuzz_targets/redact.rs"
+harness = false
+
+[[bin]]
+name = "enc"
+path = "fuzz_targets/enc.rs"
+harness = false
+
+# cargo-fuzz harness conventions; `[workspace]` keeps this out of the parent
+# build, the `cargo-fuzz` marker is required so `cargo fuzz` recognizes it.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true

@@ -1,0 +1,74 @@
+name: Bug report
+description: Something in screendoc behaves incorrectly or crashes.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report a crash, wrong output, or a misbehaving subcommand. If you
+        can, run the failing command with `RUST_BACKTRACE=1` included below.
+  - type: dropdown
+    id: command
+    attributes:
+      label: Subcommand
+      options:
+        - record
+        - on / off / hook-script / hook-append
+        - chapter
+        - render
+        - serve
+        - play
+        - import
+        - search
+        - redact
+        - list / status / rm / rename / prune
+        - config
+        - doctor / completions / other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you ran and what you saw (output included).
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: |
+        The smallest command sequence that reproduces the problem
+        (recording fixtures are fine; do not paste real secrets —
+        use `redact --secret` on any fixture first).
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: Version
+      description: `screendoc --version` output.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [Linux, macOS, Windows, other]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Backtrace / logs
+      description: |
+        Run with `RUST_BACKTRACE=1 screendoc …` and paste the relevant output.
+      render: shell

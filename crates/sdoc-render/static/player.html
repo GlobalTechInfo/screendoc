@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>screendoc player</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/xterm.css">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    background: #0d1117; color: #e5e4e1; display: flex; min-height: 100vh;
+  }
+  #sidebar {
+    width: 260px; background: #161b22; border-right: 1px solid #30363d;
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  #sidebar header { padding: 12px 14px; border-bottom: 1px solid #30363d; }
+  #sidebar h1 { font-size: 14px; margin: 0 0 4px; letter-spacing: .04em; }
+  #sidebar .meta { font-size: 11px; color: #8b949e; line-height: 1.5; }
+  #chapters { overflow: auto; flex: 1; padding: 8px 0; }
+  .chapter {
+    padding: 6px 14px; font-size: 12px; cursor: pointer; color: #8b949e;
+    border-left: 3px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chapter:hover { background: #1c2128; color: #e5e4e1; }
+  .chapter.active { border-left-color: #f0883e; color: #e5e4e1; background: #1c2128; }
+  .chapter .rc { float: right; color: #57a64a; font-size: 11px; }
+  .chapter.fail .rc { color: #f85149; }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #terminal { flex: 1; padding: 10px 14px; min-height: 0; }
+  #terminal .terminal { height: 100%; }
+  #controls {
+    display: flex; gap: 10px; align-items: center; padding: 10px 14px;
+    background: #161b22; border-top: 1px solid #30363d; font-size: 12px;
+  }
+  #controls button {
+    background: #21262d; color: #e5e4e1; border: 1px solid #30363d;
+    border-radius: 6px; padding: 5px 12px; font: inherit; cursor: pointer;
+  }
+  #controls button:hover { background: #2d333b; }
+  #controls select { background: #21262d; color: #e5e4e1; border: 1px solid #30363d; border-radius: 6px; padding: 4px 8px; }
+  #progress { flex: 1; height: 4px; background: #30363d; border-radius: 2px; overflow: hidden; }
+  #progress div { height: 100%; width: 0; background: #f0883e; }
+  #time { color: #8b949e; font-variant-numeric: tabular-nums; min-width: 110px; text-align: right; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <header>
+    <h1>SCREENDOC</h1>
+    <div class="meta" id="meta">loading…</div>
+  </header>
+  <div id="chapters"></div>
+</div>
+<div id="main">
+  <div id="terminal"><div class="terminal"></div></div>
+  <div id="controls">
+    <button id="play">▶ play</button>
+    <button id="restart">⟲</button>
+    <select id="speed">
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="2">2×</option>
+      <option value="4">4×</option>
+      <option value="8">8×</option>
+    </select>
+    <a id="dl" href="/cast" download style="color:#8b949e;text-decoration:none">⬇ .cast</a>
+    <div id="progress" title="click to seek"><div></div></div>
+    <div id="time">0:00 / 0:00</div>
+    <span style="color:#57606a;font-size:11px">space ⏯ · ←/→ chapters</span>
+  </div>
+</div>
+<script src="/xterm.js"></script>
+<script src="/addon-fit.js"></script>
+<!--SCREENDOC:EMBED-->
+<script>
+(function () {
+  "use strict";
+  // The xterm UMD bundle attaches its exports to the global scope
+  // (window.Terminal), not a `window.term` namespace; some builds wrap
+  // the class in an ESM interop object ({Terminal, __esModule}).
+  function unwrapCtor(maybe) {
+    if (!maybe) return null;
+    return typeof maybe === "function" ? maybe : maybe.Terminal || maybe.FitAddon || null;
+  }
+  let TermCtor = unwrapCtor((window.term && window.term.Terminal) || window.Terminal);
+  if (!TermCtor) {
+    document.querySelector("#terminal .terminal").textContent =
+      "failed to load the terminal component";
+    return;
+  }
+  const term = new TermCtor({
+    fontFamily: '"Cascadia Code", Menlo, Consolas, ui-monospace, monospace',
+    fontSize: 13, allowProposedApi: true, scrollback: 5000,
+    theme: { background: "#0d1117", foreground: "#e5e4e1", cursor: "#f0883e" }
+  });
+  const el = document.querySelector("#terminal .terminal");
+  term.open(el);
+  const FitCtor = unwrapCtor(window.FitAddon || window.TerminalFitAddon);
+  const fit = FitCtor ? new FitCtor() : null;
+
+  let cast = [];          // [ [t, type, data], ... ]
+  let header = null;
+  let events = [];        // screendoc events.jsonl (array form)
+  let chapters = [];      // {tMs, title, seq?, exitCode?, fail?}
+  let head = 0;           // index into cast of next event to write
+  let curMs = 0;
+  let playing = false;
+  let speed = 1;
+  let lastFrame = 0;
+  let durationMs = 0;
+
+  function cols() { return header && header.terminal_width ? header.terminal_width : 120; }
+  function rows() { return header && header.terminal_height ? header.terminal_height : 30; }
+
+  function applySize(c, r) {
+    term.resize(Math.max(1, c | 0), Math.max(1, r | 0));
+  }
+
+  function parseResize(d) {
+    const m = /^(\d+)x(\d+)$/.exec(d);
+    return m ? { c: +m[1], r: +m[2] } : null;
+  }
+
+  function writeUntil(targetMs) {
+    while (head < cast.length) {
+      const ev = cast[head];
+      if (ev[0] * 1000 > targetMs) break;
+      if (ev[1] === "o") term.write(ev[2]);
+      else if (ev[1] === "i") term.write(ev[2]);
+      else if (ev[1] === "r") { const p = parseResize(ev[2]); if (p) applySize(p.c, p.r); }
+      head++;
+    }
+    term.scrollDisp ? 0 : term.scrollToBottom();
+  }
+
+  function fmt(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    return m + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  function setChapter(tMs) {
+    let active = null;
+    for (const c of chapters) if (c.tMs <= tMs) active = c;
+    document.querySelectorAll(".chapter").forEach((n, i) =>
+      n.classList.toggle("active", chapters[i] === active));
+  }
+
+  function tick(ts) {
+    if (playing) {
+      if (!lastFrame) lastFrame = ts;
+      const dt = ((ts - lastFrame) / 1000) * 1000 * speed;
+      lastFrame = ts;
+      curMs = Math.min(durationMs, curMs + dt);
+      writeUntil(curMs);
+      updateUi();
+      if (curMs >= durationMs) { playing = false; playBtn.textContent = "▶ play"; }
+    } else {
+      lastFrame = 0;
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function updateUi() {
+    document.querySelector("#progress div").style.width =
+      (durationMs ? (curMs / durationMs) * 100 : 0) + "%";
+    document.getElementById("time").textContent = fmt(curMs) + " / " + fmt(durationMs);
+    setChapter(curMs);
+  }
+
+  const playBtn = document.getElementById("play");
+  playBtn.addEventListener("click", () => {
+    playing = !playing;
+    playBtn.textContent = playing ? "❚❚ pause" : "▶ play";
+    if (curMs >= durationMs) { head = 0; curMs = 0; term.reset(); }
+  });
+  document.getElementById("restart").addEventListener("click", () => {
+    head = 0; curMs = 0; term.reset(); writeUntil(0); updateUi();
+  });
+  document.getElementById("speed").addEventListener("change", (e) => {
+    speed = parseFloat(e.target.value);
+  });
+
+  function buildChapters() {
+    const box = document.getElementById("chapters");
+    box.textContent = "";
+    for (const c of chapters) {
+      const d = document.createElement("div");
+      d.className = "chapter" + (c.fail ? " fail" : "");
+      d.textContent = c.title || ("command #" + (c.seq || "?"));
+      const rc = document.createElement("span");
+      rc.className = "rc";
+      rc.textContent = c.exitCode != null ? "✓ " + c.exitCode : "";
+      d.appendChild(rc);
+      d.addEventListener("click", () => {
+        // Seek: rewind cast to just before the chapter, then fast-forward.
+        head = 0; curMs = c.tMs; term.reset(); writeUntil(c.tMs - 50);
+        writeUntil(c.tMs + 1); updateUi();
+      });
+      box.appendChild(d);
+    }
+  }
+
+  function showMeta(m) {
+    const bits = [];
+    if (m.shell) bits.push(m.shell);
+    if (m.mode) bits.push(m.mode + " mode");
+    if (m.title) bits.push("“" + m.title + "”");
+    if (m.duration_ms) bits.push(fmt(m.duration_ms));
+    document.getElementById("meta").textContent = bits.join(" · ") || m.id;
+  }
+
+  // Shared startup for both data sources: the serve build fetches
+  // /cast + /events + /meta; the standalone export (screendoc render
+  // --web) embeds them in window.__SCREENDOC__ and needs no server.
+  function boot(castText, evs, meta) {
+    if (meta) showMeta(meta);
+    const lines = castText.trim().split("\n");
+    header = JSON.parse(lines[0]);
+    for (let i = 1; i < lines.length; i++) {
+      const ev = JSON.parse(lines[i]);
+      if (ev[1] === "o" || ev[1] === "i" || ev[1] === "r") cast.push(ev);
+    }
+    events = Array.isArray(evs) ? evs : [];
+    durationMs = cast.length ? cast[cast.length - 1][0] * 1000 : 0;
+
+    applySize(cols(), rows());
+    chapters = [];
+    const cmdBySeq = {};
+    for (const e of events) {
+      if (e.e === "command") cmdBySeq[e.seq] = e;
+      else if (e.e === "chapter") {
+        const c = {
+          tMs: e.at_ms, title: e.title,
+          seq: e.source === "auto" ? (e.title && parseInt(e.title, 10) || undefined) : undefined,
+        };
+        const cmd = cmdBySeq[c.seq];
+        if (cmd) { c.exitCode = cmd.exit_code; c.fail = cmd.exit_code > 0; c.title = cmd.command; }
+        chapters.push(c);
+      }
+    }
+    chapters.sort((a, b) => a.tMs - b.tMs);
+    buildChapters();
+    writeUntil(0); updateUi();
+
+    // In standalone mode the .cast download is a Blob built from the
+    // embedded data (no /cast endpoint exists in a file:// context).
+    if (window.__SCREENDOC__) {
+      const dl = document.getElementById("dl");
+      dl.href = URL.createObjectURL(
+        new Blob([window.__SCREENDOC__.castText], { type: "application/json" })
+      );
+      dl.download = ((meta && meta.id) || "session") + ".cast";
+    }
+  }
+
+  if (window.__SCREENDOC__) {
+    boot(window.__SCREENDOC__.castText, window.__SCREENDOC__.events, window.__SCREENDOC__.meta);
+  } else {
+    let fetchedMeta = null;
+    fetch("/meta").then((r) => r.json()).then((m) => { fetchedMeta = m; showMeta(m); });
+    Promise.all([
+      fetch("/cast").then((r) => r.text()),
+      fetch("/events").then((r) => r.json())
+    ]).then(([castText, evs]) => boot(castText, evs, fetchedMeta));
+  }
+
+  function seekTo(tMs) {
+    tMs = Math.max(0, Math.min(durationMs, tMs));
+    head = 0; curMs = tMs; term.reset();
+    writeUntil(tMs); updateUi();
+  }
+  function prevChapter() {
+    for (let i = chapters.length - 1; i >= 0; i--) if (chapters[i].tMs < curMs - 200) { seekTo(chapters[i].tMs); return; }
+    seekTo(0);
+  }
+  function nextChapter() {
+    for (const c of chapters) if (c.tMs > curMs + 200) { seekTo(c.tMs); return; }
+    seekTo(durationMs);
+  }
+
+  document.getElementById("progress").addEventListener("click", (e) => {
+    const bar = e.currentTarget;
+    const r = bar.getBoundingClientRect();
+    seekTo(((e.clientX - r.left) / r.width) * durationMs);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+    switch (e.key) {
+      case " ":
+        e.preventDefault();
+        playBtn.click();
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        prevChapter();
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        nextChapter();
+        break;
+      case "r":
+      case "R":
+        document.getElementById("restart").click();
+        break;
+    }
+  });
+
+  if (fit) {
+    fit.fit();
+    window.addEventListener("resize", () => fit && fit.fit());
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

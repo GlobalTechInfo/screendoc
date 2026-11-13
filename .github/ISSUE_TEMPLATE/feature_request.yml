@@ -1,0 +1,30 @@
+name: Feature request
+description: A new capability, output format, or workflow for screendoc.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: What are you trying to do today, and where does screendoc fall short?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed feature
+      description: The command/flag/behavior you would like, with an example invocation if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What you tried instead (other tools, manual steps), and why it didn't work.
+  - type: markdown
+    attributes:
+      value: |
+        Note: security-relevant requests (exposing data, new network
+        endpoints, new file locations) need a brief threat-model note in
+        "Problem or workflow".

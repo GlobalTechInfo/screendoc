@@ -1,0 +1,31 @@
+# Dependabot configuration
+#
+# This repo pins exact dependency versions (an industry-standard supply
+# chain control). Dependabot PRs are the maintenance mechanism: each PR
+# bumps one pin at a time and the gate (clippy + tests + license audit)
+# decides if the new version is acceptable.
+
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps:"
+    labels: [dependencies]
+    versioning-strategy: lockfile-only
+
+  - package-ecosystem: "cargo"
+    directory: "/fuzz"
+    schedule:
+      interval: "weekly"
+    labels: [dependencies, fuzz]
+    versioning-strategy: lockfile-only
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci:"

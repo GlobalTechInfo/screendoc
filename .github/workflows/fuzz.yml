@@ -1,0 +1,55 @@
+# Fuzz smoke: build all fuzz targets and run each briefly to catch
+# panics on the seeded corpus. Full fuzzing happens locally
+# (cargo +nightly fuzz); CI only guards the smoke path.
+name: Fuzz
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # weekly
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      # cargo-fuzz drives rustc with nightly-only flags (-Zsanitizer), so
+      # nightly must be the toolchain cargo resolves to inside the fuzz
+      # workspace; the stable default on the runner does not accept them.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          default: true
+      - run: rustup component add rust-src
+      # The nightly no longer ships the clang rustup component on x86_64
+      # Linux; the runner image includes clang, and we ensure it anyway.
+      - run: sudo apt-get install -y clang || true
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      # UBSAN is not supported by rustc yet (rust-lang/rust#34755); the
+      # ASAN default is what we run.
+      - name: Build fuzz targets
+        run: cargo +nightly fuzz build
+      - name: Smoke-run each target (60s)
+        run: |
+          set -e
+          for t in marker cast redact enc; do
+            echo "::group::$t"
+            cargo +nightly fuzz run "$t" -- -max_total_time=60 -runs=100000
+            echo "::endgroup::"
+          done
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-crashes
+          path: fuzz/artifacts/

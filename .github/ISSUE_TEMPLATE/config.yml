@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/GlobalTechInfo/screendoc/security/advisories/new
+    about: Do not open public issues for security problems — see SECURITY.md.
+  - name: Documentation questions
+    url: https://github.com/GlobalTechInfo/screendoc/discussions
+    about: Usage questions fit better in discussions or the docs.

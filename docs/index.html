@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>screendoc — record your terminal, publish it anywhere</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --border:#30363d;
+          --text:#e5e4e1; --dim:#8b949e; --accent:#f0883e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.6 ui-monospace, Menlo, Consolas, monospace; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 26px; letter-spacing:.04em; }
+  h2 { border-bottom:1px solid var(--border); padding-bottom:6px; margin-top:40px; }
+  code, pre { background:var(--panel); border:1px solid var(--border);
+              border-radius:6px; }
+  code { padding:1px 5px; }
+  pre { padding:12px 14px; overflow:auto; }
+  pre code { padding:0; border:0; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { border:1px solid var(--border); padding:6px 10px; text-align:left; }
+  th { background:var(--panel); }
+  .toc a { color:var(--accent); text-decoration:none; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px;
+          background:var(--panel); border:1px solid var(--border);
+          font-size:12px; color:var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SCREENDOC</h1>
+  <p>Record your terminal session once, publish it everywhere:
+     <span class="pill">GIF</span> <span class="pill">MP4</span>
+     <span class="pill">WebM/AV1</span> <span class="pill">asciinema .cast</span>
+     <span class="pill">web player</span> — plus command boundaries,
+     exit codes, and chapters in one structured journal.</p>
+
+  <h2 class="toc">Contents</h2>
+  <p>
+    <a href="#install">Install</a> ·
+    <a href="#modes">Recording modes</a> ·
+    <a href="#commands">Commands</a> ·
+    <a href="#config">Config</a> ·
+    <a href="#data">Data layout</a> ·
+    <a href="#formats">Formats &amp; interop</a> ·
+    <a href="#limits">Limitations</a>
+  </p>
+
+  <h2 id="install">Install</h2>
+  <pre><code># from source (needs Rust ≥1.99; ffmpeg for video)
+git clone https://github.com/GlobalTechInfo/screendoc &amp;&amp; cd screendoc
+./scripts/install.sh          # release build → ~/.local/bin
+
+# fully static Linux binary (no glibc dependency)
+./scripts/build-static.sh
+
+# verify
+screendoc doctor</code></pre>
+
+  <h2 id="modes">Recording modes</h2>
+  <table>
+    <tr><th>Mode</th><th>What it captures</th><th>How</th></tr>
+    <tr><td>Wrapper</td><td>A command in a fresh pty</td>
+        <td><code>screendoc record &lt;cmd&gt;</code> (bash rcfile + inline OSC 90 markers)</td></tr>
+    <tr><td>Ambient</td><td>Your running interactive shell</td>
+        <td><code>screendoc on</code> / <code>screendoc off</code> (PROMPT_COMMAND hooks, bash/zsh/fish)</td></tr>
+    <tr><td>tmux pane</td><td>One pane of a live tmux session</td>
+        <td><code>screendoc record --tmux [pane]</code> (<code>pipe-pane</code>)</td></tr>
+    <tr><td>tmux group</td><td><strong>Every pane</strong> of a tmux session</td>
+        <td><code>screendoc record --tmux-group &lt;session&gt;</code> (linked sessions via <code>group</code>)</td></tr>
+  </table>
+
+  <h2 id="commands">Commands</h2>
+  <table>
+    <tr><th>Command</th><th>What it does</th></tr>
+    <tr><td><code>record</code></td><td>Record a command, a tmux pane, or a whole tmux session</td></tr>
+    <tr><td><code>on</code> / <code>off</code></td><td>Ambient start / stop</td></tr>
+    <tr><td><code>chapter</code></td><td>Add a manual chapter marker</td></tr>
+    <tr><td><code>render</code></td><td>GIF/MP4/WebM/AV1/cast/<strong>self-contained HTML player</strong> (<code>--web</code>); <code>--chapters</code> (one video per chapter), <code>--frames</code> (still PNGs), <code>--idle-limit</code> (gap compression), <code>--speed</code>, <code>--fps</code></td></tr>
+    <tr><td><code>serve</code></td><td>Local web player (chapters, speed, seek, keyboard shortcuts, .cast download)</td></tr>
+    <tr><td><code>play</code></td><td>Replay the cast in your terminal (<code>--fast</code> to skip waits, <code>--from/--to</code> for a time window)</td></tr>
+    <tr><td><code>import</code></td><td>Ingest an asciinema v2/v3 cast (plain or gzip) as a session (<code>--json</code> machine output)</td></tr>
+    <tr><td><code>search</code></td><td>Find commands / output across sessions</td></tr>
+    <tr><td><code>redact</code></td><td>Mask secrets in place: ad-hoc regex, <code>--secret</code> (built-in credential detectors), <code>--rules file</code> (ANSI-safe, <code>--json</code> summary)</td></tr>
+    <tr><td><code>list</code> / <code>status</code> / <code>rm</code> / <code>rename</code> / <code>prune</code></td><td>Session lifecycle &amp; retention (<code>prune --json</code> machine output)</td></tr>
+    <tr><td><code>config</code></td><td><code>show</code> / <code>get</code> / <code>set</code> the user config</td></tr>
+    <tr><td><code>stop</code></td><td>Finalize a background tmux recording</td></tr>
+    <tr><td><code>doctor</code> / <code>completions</code></td><td>Environment check / shell completions</td></tr>
+  </table>
+
+  <h2 id="config">Config</h2>
+  <p><code>~/.config/screendoc/config.toml</code> (all keys optional):</p>
+  <pre><code>fps = 20          # video frame rate
+gif_fps = 15
+speed = 1.0       # playback multiplier
+cols = 120        # default terminal size (wrapper)
+rows = 30
+port = 4999       # web player port
+cell_width = 12   # raster cell size
+cell_height = 24
+idle_limit = 2.0  # compress idle gaps longer than this (0 = off)
+theme = "xterm"   # xterm | dracula | nord | tokyo | solarized</code></pre>
+
+  <h2 id="data">Data layout</h2>
+  <pre><code>~/.screendoc/
+├── current                  # active session pointer
+└── sessions/&lt;id&gt;/
+    ├── meta.json           # shell, size, mode, group, duration, title
+    ├── events.jsonl        # structured journal (source of truth #1)
+    ├── markers.jsonl       # hook-appended markers (ambient/tmux)
+    ├── raw.cast            # asciinema byte stream (source of truth #2)
+    └── frames/             # rendered stills / per-chapter stills</code></pre>
+
+  <h2 id="formats">Formats &amp; interop</h2>
+  <ul>
+    <li><strong>Out:</strong> asciinema v2 casts (playable by
+        <code>asciinema play</code> and the asciinema.org web player),
+        GIF / MP4 / WebM(VP9) / AV1 via ffmpeg, and the local web player.</li>
+    <li><strong>In:</strong> <code>screendoc import</code> accepts asciinema
+        v2 (JSON-array) and v3 (JSON-lines, relative timestamps) casts,
+        rewriting them into a screendoc session you can render/chapter/search.</li>
+  </ul>
+
+  <h2 id="limits">Limitations</h2>
+  <ul>
+    <li>Wrapper mode records through <code>bash</code> (the generated hook
+        rcfile); other shells use ambient hooks or tmux.</li>
+    <li>GIF/MP4/WebM/AV1 need <code>ffmpeg</code>; cast import/export and
+        the web player do not.</li>
+    <li>Redaction is best-effort: secrets split across cast events, or
+        rendered inside escape sequences, may not match.</li>
+    <li>The web player binds to 127.0.0.1 only — not for public hosting.</li>
+  </ul>
+
+  <p style="color:var(--dim);margin-top:48px">MIT OR Apache-2.0 ·
+     <a href="https://github.com/GlobalTechInfo/screendoc">github.com/GlobalTechInfo/screendoc</a></p>
+</div>
+</body>
+</html>

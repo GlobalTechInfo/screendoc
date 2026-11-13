@@ -1,0 +1,8 @@
+[alias]
+lint = "clippy --workspace --all-targets -- -D warnings"
+fmt-check = "fmt --all -- --check"
+test-all = "test --workspace"
+doc = "doc --workspace --no-deps"
+
+[build]
+jobs = 2

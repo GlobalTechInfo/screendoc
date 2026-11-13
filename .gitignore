@@ -1,0 +1,27 @@
+/target
+/Cargo.lock.bak
+dist/
+*.swp
+.DS_Store
+.vscode/
+.idea/
+.env
+core
+*.core
+/screendoc
+# fuzz: corpora, crash artifacts and build outputs (confirmed crashes are
+# pinned as unit tests in the affected crate)
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/target/
+fuzz/Cargo.lock
+# render outputs written to CWD when running the CLI at the repo root
+/*.cast
+/*.gif
+/*.mp4
+/*.webm
+/*-final.png
+/*.png
+/*.html
+# static build output
+dist/screendoc-*
