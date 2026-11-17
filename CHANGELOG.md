@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-17
+
+### Fixed
+
+- **Recorded terminal size now drives every raster render** (video, GIF,
+  stills, chapters). Previously the cast header's `terminal_width`/
+  `terminal_height` was dropped, so an 80x24 session rendered at the 120x30
+  default. The session start size and the cast header are now honored as
+  fallbacks, with explicit resize events still taking precedence.
+- **Empty recordings render a minimum-length video instead of an
+  unplayable single-frame artifact.** A session that captured no terminal
+  output (e.g. `screendoc record true`) now yields a short, playable clip
+  instead of a 1-frame 0.07 s GIF/MP4, and `record` reports it with a
+  warning so the degenerate case is no longer silent.
+
+### Added
+
+- Release pipeline ships a **CycloneDX 1.6 SBOM** (`SBOM.json`) alongside
+  the binary artifacts, signed and digested like the rest of the release.
+- End-to-end regression coverage: render tests now assert GIF frame counts
+  and output dimensions, including the recorded-size and empty-session
+  cases that produced the defects above.
+
 ## [0.1.0] - 2026-11-11
 
 First release.

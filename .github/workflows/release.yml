@@ -185,6 +185,17 @@ jobs:
           (cd release && sha256sum *.tar.gz *.zip > SHA256SUMS)
           for f in release/*; do echo "  - $f"; done
 
+      - name: Generate SBOM (CycloneDX 1.6)
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cargo-sbom --version 0.10.0 --locked
+          cargo +stable sbom --output-format cyclone_dx_json_1_6 > release/SBOM.json
+          python3 -c 'import json; d=json.load(open("release/SBOM.json")); print("OK: SBOM v"+d["version"], len(d.get("components", [])), "components")'
+          cd release && sha256sum SBOM.json >> SHA256SUMS
+        env:
+          CARGO_TERM_COLOR: always
+
       # Enterprise supply-chain control: when the repo secret
       # SDOC_RELEASE_SIGNING_KEY (private GPG key) is configured, every
       # artifact and the checksum manifest are detached-signed; `install.sh`
