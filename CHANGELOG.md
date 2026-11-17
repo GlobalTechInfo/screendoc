@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-17
+
+### Fixed
+
+- **Encrypted session journals are now readable after decryption.**
+  `record --encrypt` stored each event-log and marker-log record without a
+  line terminator, so a session with more than one event decrypted to a
+  single concatenated line and failed to parse (`json error: trailing
+  characters`). Every record now carries its own newline; covered by a
+  unit round-trip and the encrypted e2e test.
+
+### Added
+
+- **Runnable examples** (`examples/`, driven by CI): record-and-render,
+  chapters + redaction, local web serving, and encrypted recording — each
+  end-to-end verifiable in a sandboxed home directory.
+- **Criterion micro-benchmarks** for the hot paths (rule masking, marker
+  reading, cast parsing, idle compression) with a fast-mode CI job.
+- **Documentation**: `docs/design.md` (architecture, data model,
+  marker demux, render pipeline, encryption), `docs/user-guide.md`, and
+  `docs/threat-model.md` (T1–T6 with mitigations and residual risk).
+- **CI hardening**: MSRV job (Rust 1.99 `cargo check`), line-coverage
+  gate (`cargo-llvm-cov`, `--fail-under-lines 70`), unused-dependency
+  audit on nightly, and dedicated `examples` and `bench` jobs.
+
 ## [0.2.0] - 2026-11-17
 
 ### Fixed

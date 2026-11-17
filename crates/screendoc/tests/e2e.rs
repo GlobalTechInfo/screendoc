@@ -940,6 +940,11 @@ fn encrypted_record_roundtrips() {
     // The transparent read path returns the plaintext.
     let cast = s.read_cast_text().expect("cast text");
     assert!(cast.contains(&marker), "transparent read must decrypt");
+    // The event journal must also read back line-by-line after
+    // decryption (regression: records were appended without newlines,
+    // so N events collapsed into one unparseable line).
+    let events = s.read_events().expect("events decrypt");
+    assert!(!events.is_empty(), "encrypted session must have events");
 
     cleanup(&[id]);
 }

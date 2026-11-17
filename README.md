@@ -228,8 +228,18 @@ encryption), `sdoc-record` (pty wrapper, hooks, tmux), `sdoc-render`
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
+cargo bench -p sdoc-core -p sdoc-render     # criterion micro-benchmarks
+./examples/run-all.sh                      # end-to-end examples, CI-driven
 scripts/ci-local.sh        # the whole CI pipeline, locally
 ```
+
+Examples: `examples/` — record-and-render, chapters + redaction, local web
+serving, encrypted recording, each verifiable end-to-end in a sandboxed
+home (also a CI job). Benchmarks: `benches/` (criterion) over rule
+masking, marker reading, cast parsing, and idle compression.
+Documentation: [docs/design.md](docs/design.md),
+[docs/user-guide.md](docs/user-guide.md),
+[docs/threat-model.md](docs/threat-model.md).
 
 Contributors: read [CONTRIBUTING.md](CONTRIBUTING.md) for the house rules
 (pinned deps, zero `#[allow]`, every behavior tested). Reports:
