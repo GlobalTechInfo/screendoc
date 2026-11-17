@@ -178,8 +178,98 @@ fn wrapper_render_gif_and_mp4_when_ffmpeg_present() {
     assert!(mp4.exists(), "mp4 missing");
     assert!(gif.metadata().map(|m| m.len() > 0).unwrap_or(false));
     assert!(mp4.metadata().map(|m| m.len() > 0).unwrap_or(false));
+    // The recorded session is 30x5, so the rendered gif must keep the
+    // recorded size instead of falling back to the 120x30 default.
+    let (w, h) = gif_header_size(&gif).expect("gif header");
+    assert_eq!((w, h), (30 * 12, 5 * 24 + 22), "gif dims must match the recorded 30x5 session");
+    assert!(gif_frame_count(&gif) >= 2, "gif must have at least 2 frames");
     let _ = std::fs::remove_dir_all(&out);
     cleanup(&[id]);
+}
+
+/// A session that captured no terminal output must still render a
+/// *playable* video: the old bug produced a single-frame 0.07 s gif.
+#[test]
+fn wrapper_render_empty_session_yields_playable_video_when_ffmpeg_present() {
+    let _g = lock();
+    if find_in_path("ffmpeg").is_none() {
+        eprintln!("SKIP: ffmpeg not installed");
+        return;
+    }
+    let session = run_and_capture(&["screendoc", "record", "--size", "30x5", "true"]);
+    let id = session.id().to_string();
+    let out = std::env::temp_dir().join(format!("sdoc-e2e-empty-{id}"));
+    let _ = std::fs::remove_dir_all(&out);
+    let code = run_cli(&[
+        "screendoc",
+        "render",
+        &id,
+        "--gif",
+        "--mp4",
+        "--out",
+        out.to_string_lossy().as_ref(),
+    ]);
+    assert_eq!(code, 0);
+    let gif = out.join(format!("{id}.gif"));
+    assert!(gif.exists(), "empty-session gif missing");
+    let frames = gif_frame_count(&gif);
+    // min_playback floors a zero-length session to 1.0 s, so at the
+    // default gif fps the result must have well more than one frame.
+    assert!(frames >= 2, "empty-session gif has only {frames} frame(s)");
+    let _ = std::fs::remove_dir_all(&out);
+    cleanup(&[id]);
+}
+
+/// A non-default recorded size must flow through to the rendered stills.
+#[test]
+fn wrapper_render_stills_keep_recorded_size_when_ffmpeg_present() {
+    let _g = lock();
+    if find_in_path("ffmpeg").is_none() {
+        eprintln!("SKIP: ffmpeg not installed");
+        return;
+    }
+    let session = run_and_capture(&[
+        "screendoc",
+        "record",
+        "--size",
+        "40x8",
+        "echo",
+        "stills test",
+        "exit",
+        "0",
+    ]);
+    let id = session.id().to_string();
+    let out = std::env::temp_dir().join(format!("sdoc-e2e-stills-{id}"));
+    let _ = std::fs::remove_dir_all(&out);
+    let code =
+        run_cli(&["screendoc", "render", &id, "--frames", "--out", out.to_string_lossy().as_ref()]);
+    assert_eq!(code, 0);
+    let png = out.join(format!("{id}-final.png"));
+    assert!(png.exists(), "final still missing");
+    let (w, h) = image::image_dimensions(&png).expect("still dims");
+    assert_eq!((w, h), (40 * 12, 8 * 24 + 22), "still dims must match the recorded 40x8 session");
+    let _ = std::fs::remove_dir_all(&out);
+    cleanup(&[id]);
+}
+
+/// Read the GIF logical-screen dimensions from the file header.
+fn gif_header_size(path: &std::path::Path) -> Option<(u32, u32)> {
+    let data = std::fs::read(path).ok()?;
+    if data.len() < 10 || &data[0..3] != b"GIF" {
+        return None;
+    }
+    Some((
+        u16::from_le_bytes([data[6], data[7]]) as u32,
+        u16::from_le_bytes([data[8], data[9]]) as u32,
+    ))
+}
+
+/// Count a GIF's frames (dev-dependency `image`).
+fn gif_frame_count(path: &std::path::Path) -> usize {
+    let data = std::fs::read(path).expect("read gif");
+    let decoder =
+        image::codecs::gif::GifDecoder::new(std::io::Cursor::new(data)).expect("gif decode");
+    image::AnimationDecoder::into_frames(decoder).count()
 }
 
 #[test]

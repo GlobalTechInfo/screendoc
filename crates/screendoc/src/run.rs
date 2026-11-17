@@ -166,6 +166,17 @@ fn record(
                 summary.commands,
                 summary.session.read_meta()?.duration_ms.unwrap_or(0)
             );
+            // Warn early when a tmux capture produced no terminal output:
+            // such sessions render to a blank video.
+            let cast_text = summary.session.read_cast_text()?;
+            let evs = sdoc_render::frame::parse_cast(&cast_text).unwrap_or_default();
+            if !evs.iter().any(|e| e.ty == "o") {
+                println!(
+                    "{}",
+                    "⚠ no terminal output was captured — rendered videos will show a blank terminal"
+                        .yellow()
+                );
+            }
             println!(
                 "  render: {}",
                 format!("screendoc render {} --gif --mp4 --cast", summary.session.id()).yellow()
@@ -195,6 +206,18 @@ fn record(
                 summary.commands,
                 fmt_duration(meta.duration_ms.unwrap_or(0))
             );
+            // Surface degenerate recordings early: a session that captured
+            // no terminal output will render to a blank video, which users
+            // mistake for a broken export.
+            let cast_text = summary.session.read_cast_text()?;
+            let evs = sdoc_render::frame::parse_cast(&cast_text).unwrap_or_default();
+            if !evs.iter().any(|e| e.ty == "o") {
+                println!(
+                    "{}",
+                    "⚠ no terminal output was captured — rendered videos will show a blank terminal"
+                        .yellow()
+                );
+            }
             println!(
                 "  render: {}",
                 format!("screendoc render {} --gif --mp4", summary.session.id()).yellow()

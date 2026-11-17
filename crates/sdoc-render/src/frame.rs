@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use image::RgbaImage;
 use rusttype::{Font, Scale, point};
+use sdoc_core::Size;
 use vt100::{Color, Parser, Screen};
 
 /// The embedded monospace font used to rasterize terminal cells.
@@ -445,6 +446,19 @@ pub fn parse_cast(text: &str) -> Result<Vec<CastEvent>> {
     Ok(out)
 }
 
+/// Read the terminal size recorded in a cast file's header line, if the
+/// writer embedded one. Our recorder writes `"terminal_width"` /
+/// `"terminal_height"`; stock asciinema headers omit them, in which case
+/// `None` is returned and the caller falls back to its default size.
+pub fn parse_cast_header_size(text: &str) -> Option<Size> {
+    let line = text.lines().next()?.trim();
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let o = v.as_object()?;
+    let cols = o.get("terminal_width")?.as_u64()? as u16;
+    let rows = o.get("terminal_height")?.as_u64()? as u16;
+    (cols > 0 && rows > 0).then_some(Size { cols, rows })
+}
+
 /// Feed a run of output/resize events into a parser up to (and including)
 /// the event at index `last`.
 /// Feed a batch of newly-arrived cast events into the terminal parser.
@@ -477,6 +491,22 @@ fn parse_resize(s: &str) -> Option<(u16, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_cast_header_size_reads_recorded_dimensions() {
+        let text = r#"{"version":2,"terminal_width":80,"terminal_height":24}"#.to_string()
+            + "\n[\"0.000\",\"o\",\"hi\"]\n";
+        assert_eq!(parse_cast_header_size(&text), Some(Size { cols: 80, rows: 24 }));
+    }
+
+    #[test]
+    fn parse_cast_header_size_missing_in_stock_asciinema() {
+        // Stock asciinema v2 headers carry no size: renderers must fall back.
+        let text = r#"{"version":2,"width":80,"height":24}"#.to_string() + "\n";
+        assert_eq!(parse_cast_header_size(&text), None);
+        assert_eq!(parse_cast_header_size(""), None);
+        assert_eq!(parse_cast_header_size("not json\n[0.0,\"o\",\"x\"]"), None);
+    }
 
     #[test]
     fn parses_cast_events() {

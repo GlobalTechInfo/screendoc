@@ -1883,6 +1883,7 @@ dependencies = [
  "clap_complete",
  "dirs",
  "flate2",
+ "image",
  "sdoc-core",
  "sdoc-record",
  "sdoc-render",

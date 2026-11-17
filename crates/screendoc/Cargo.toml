@@ -35,3 +35,4 @@ webbrowser = "=1.2.6"
 [dev-dependencies]
 flate2 = "=1.1.11"
 tempfile = "=3.27.0"
+image = "=0.25.10"
