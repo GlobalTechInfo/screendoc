@@ -221,7 +221,11 @@ jobs:
       - uses: actions/checkout@v7
       # cargo-udeps sets RUSTFLAGS=-Z binary-dep-depinfo, which is a
       # nightly-only flag, so the job runs on the nightly toolchain.
+      # `default: true` makes the inner cargo/rustc invocations nightly too,
+      # not just the toolchain that installed cargo-udeps.
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          default: true
       - uses: Swatinem/rust-cache@v2
         with:
           key: udeps
