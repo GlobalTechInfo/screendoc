@@ -191,7 +191,7 @@ jobs:
           rustup toolchain install stable --profile minimal
           cargo +stable install cargo-sbom --version 0.10.0 --locked
           cargo +stable sbom --output-format cyclone_dx_json_1_6 > release/SBOM.json
-          python3 -c 'import json; d=json.load(open("release/SBOM.json")); print("OK: SBOM v"+d["version"], len(d.get("components", [])), "components")'
+          python3 -c 'import json; d=json.load(open("release/SBOM.json")); print("OK: SBOM spec", d["specVersion"], "components:", len(d.get("components", [])))'
           cd release && sha256sum SBOM.json >> SHA256SUMS
         env:
           CARGO_TERM_COLOR: always
