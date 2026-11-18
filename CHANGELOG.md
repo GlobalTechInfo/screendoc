@@ -25,7 +25,7 @@ All notable changes to this project are documented in this file, following
 - **Documentation**: `docs/design.md` (architecture, data model,
   marker demux, render pipeline, encryption), `docs/user-guide.md`, and
   `docs/threat-model.md` (T1–T6 with mitigations and residual risk).
-- **CI hardening**: MSRV job (Rust 1.99 `cargo check`),   line-coverage
+- **CI hardening**: MSRV job (Rust 1.99 `cargo check`), line-coverage
   gate (`cargo-llvm-cov`, `--fail-under-lines 70`), unused-dependency
   audit on nightly, and dedicated `examples` and `bench` jobs.
 
