@@ -355,3 +355,89 @@ jobs:
           gh api --jq .html_url "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The in-repo formula at tag time always points at the PREVIOUS release
+      # (one-release-behind invariant). After publishing, backfill main with
+      # the version + checksums just released so `brew install` tracks the
+      # newest tag.
+      - name: Backfill the homebrew formula on main
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          sha() { awk '{print $1}' "release/$1.sha256"; }
+          DARWIN_ARM_SHA=$(sha screendoc-aarch64-apple-darwin.tar.gz)
+          DARWIN_X86_SHA=$(sha screendoc-x86_64-apple-darwin.tar.gz)
+          LINUX_ARM_SHA=$(sha screendoc-aarch64-unknown-linux-gnu.tar.gz)
+          LINUX_X86_SHA=$(sha screendoc-x86_64-unknown-linux-gnu.tar.gz)
+          printf '%s\n' \
+            'class Screendoc < Formula' \
+            '  desc "Record your terminal and publish it as GIF, MP4, asciinema cast, and web player"' \
+            '  homepage "https://github.com/GlobalTechInfo/screendoc"' \
+            '  # Keep this in sync with the latest release. The release' \
+            '  # workflow backfills this file on main after every tagged' \
+            '  # release, so the formula on main is always one release' \
+            '  # behind the newest tag.' \
+            "  version \"${VERSION}\"" \
+            '' \
+            '  livecheck do' \
+            '    url "https://api.github.com/repos/GlobalTechInfo/screendoc/releases/latest"' \
+            '    regex(/v?([0-9]+\.[0-9]+\.[0-9]+)/i)' \
+            '  end' \
+            '' \
+            '  on_macos do' \
+            '    if Hardware::CPU.arm?' \
+            "      url \"https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-aarch64-apple-darwin.tar.gz\"" \
+            "      sha256 \"${DARWIN_ARM_SHA}\"" \
+            '    else' \
+            "      url \"https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-x86_64-apple-darwin.tar.gz\"" \
+            "      sha256 \"${DARWIN_X86_SHA}\"" \
+            '    end' \
+            '  end' \
+            '' \
+            '  on_linux do' \
+            '    if Hardware::CPU.aarch64?' \
+            "      url \"https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-aarch64-unknown-linux-gnu.tar.gz\"" \
+            "      sha256 \"${LINUX_ARM_SHA}\"" \
+            '    else' \
+            "      url \"https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-x86_64-unknown-linux-gnu.tar.gz\"" \
+            "      sha256 \"${LINUX_X86_SHA}\"" \
+            '    end' \
+            '  end' \
+            '' \
+            '  def install' \
+            '    bin.install "screendoc"' \
+            '  end' \
+            '' \
+            '  test do' \
+            '    system "#{bin}/screendoc", "--version"' \
+            '  end' \
+            'end' > packaging/homebrew/screendoc.rb
+          CURRENT_SHA=$(gh api --jq '.sha // empty' \
+            "repos/${GITHUB_REPOSITORY}/contents/packaging/homebrew/screendoc.rb?ref=main" || true)
+          CURRENT_B64=$(gh api --jq '.content // empty' \
+            "repos/${GITHUB_REPOSITORY}/contents/packaging/homebrew/screendoc.rb?ref=main" || true)
+          if [ -n "$CURRENT_B64" ] && \
+             [ "$(printf '%s' "$CURRENT_B64" | tr -d '\n' | base64 -d)" = "$(cat packaging/homebrew/screendoc.rb)" ]; then
+            echo "Formula on main already matches ${TAG}; skipping backfill."
+            exit 0
+          fi
+          python3 - "$TAG" "$CURRENT_SHA" <<'PY' > /tmp/formula-put.json
+          import base64, json, sys
+          tag, sha = sys.argv[1], sys.argv[2]
+          content = open("packaging/homebrew/screendoc.rb", "rb").read()
+          body = {
+              "message": f"chore(formula): backfill homebrew formula to {tag}",
+              "content": base64.b64encode(content).decode(),
+              "branch": "main",
+          }
+          if sha:
+              body["sha"] = sha
+          print(json.dumps(body))
+          PY
+          gh api -X PUT \
+            "repos/${GITHUB_REPOSITORY}/contents/packaging/homebrew/screendoc.rb" \
+            --input /tmp/formula-put.json
+          echo "Backfilled homebrew formula on main to ${TAG}."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

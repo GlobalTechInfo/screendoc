@@ -84,7 +84,8 @@ screendoc doctor               # verify ffmpeg/tmux/shell/data dir
 No glibc? Build a fully-static Linux binary: `./scripts/build-static.sh`
 (musl). Uninstall: `scripts/uninstall.sh [--purge]` /
 `scripts\uninstall.ps1 [-Purge]` (data in `~/.screendoc` is kept unless
-you purge). Packages: homebrew formula in `packaging/`, Debian/RPM
+you purge). Packages: a Homebrew formula in `packaging/` (auto-backfilled
+by the release workflow after every tag), Debian/RPM
 packages (Linux x86_64), GitHub releases (Linux gnu x86_64/aarch64 +
 static musl x86_64/i686/armv7/aarch64 (Termux), macOS, Windows;
 SHA-256 checksums, GPG-signed, SLSA provenance attestations) cut by
@@ -92,6 +93,7 @@ SHA-256 checksums, GPG-signed, SLSA provenance attestations) cut by
 packages:
 
 ```sh
+brew install ./packaging/homebrew/screendoc.rb        # Homebrew (macOS / Linux)
 sudo apt install ./screendoc_<ver>-x86_64-linux.deb   # Debian / Ubuntu
 sudo rpm -i screendoc-<ver>-x86_64-linux.rpm         # RHEL / Fedora
 ```

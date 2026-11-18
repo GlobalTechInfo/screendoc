@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-11-18
+
+### Fixed
+
+- **Homebrew formula staleness**: `packaging/homebrew/screendoc.rb` had
+  been frozen at v0.1.0 with `sha256 "TODO"` placeholders, so it was
+  unusable via Homebrew. Backfilled to v0.4.1 with real checksums and a
+  livecheck block.
+- **Formula auto-maintenance**: the release workflow now regenerates
+  the formula on `main` after every tagged release (version + checksums
+  from the release's `.sha256` assets, committed via the contents API),
+  so `brew install` always tracks the newest release.
+
+### Changed
+
+- README: Homebrew install instructions (from the in-repo formula) and
+  note that the formula is auto-backfilled by the release workflow.
+
 ## [0.4.1] - 2026-11-18
 
 ### Fixed
