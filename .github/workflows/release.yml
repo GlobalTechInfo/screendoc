@@ -114,8 +114,8 @@ jobs:
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@v4
         with:
-          subject: ${{ matrix.artifact }}=sha256:${{ steps.package-unix.outputs.sha256 || steps.package-windows.outputs.sha256 }}
-          predicate_template: slsa-provenance-v1
+          subject-name: ${{ matrix.artifact }}
+          subject-digest: sha256:${{ steps.package-unix.outputs.sha256 || steps.package-windows.outputs.sha256 }}
 
   static-musl:
     # Fully-static Linux binaries (no glibc dependency), for 64-bit and
@@ -186,8 +186,8 @@ jobs:
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@v4
         with:
-          subject: ${{ matrix.artifact }}=sha256:${{ steps.package.outputs.sha256 }}
-          predicate_template: slsa-provenance-v1
+          subject-name: ${{ matrix.artifact }}
+          subject-digest: sha256:${{ steps.package.outputs.sha256 }}
 
   distro:
     needs: [build]
