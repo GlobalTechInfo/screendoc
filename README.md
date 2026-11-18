@@ -84,13 +84,26 @@ screendoc doctor               # verify ffmpeg/tmux/shell/data dir
 No glibc? Build a fully-static Linux binary: `./scripts/build-static.sh`
 (musl). Uninstall: `scripts/uninstall.sh [--purge]` /
 `scripts\uninstall.ps1 [-Purge]` (data in `~/.screendoc` is kept unless
-you purge). Packages: homebrew formula in `packaging/`, GitHub releases
-(Linux gnu x86_64/aarch64 + static musl x86_64/i686/armv7/aarch64 (Termux),
-macOS, Windows; SHA-256 checksums, GPG-signed) cut by
-`scripts/release.sh <version>` / the tag-triggered workflow. Verify a
-release with [`PGP-KEY.asc`](PGP-KEY.asc) (fingerprint
+you purge). Packages: homebrew formula in `packaging/`, Debian/RPM
+packages (Linux x86_64), GitHub releases (Linux gnu x86_64/aarch64 +
+static musl x86_64/i686/armv7/aarch64 (Termux), macOS, Windows;
+SHA-256 checksums, GPG-signed, SLSA provenance attestations) cut by
+`scripts/release.sh <version>` / the tag-triggered workflow. Distro
+packages:
+
+```sh
+sudo apt install ./screendoc_<ver>-x86_64-linux.deb   # Debian / Ubuntu
+sudo rpm -i screendoc-<ver>-x86_64-linux.rpm         # RHEL / Fedora
+```
+
+Verify release provenance with Sigstore:
+`gh attestation list --repo GlobalTechInfo/screendoc` then
+`gh attestation verify <artifact> --repo GlobalTechInfo/screendoc`.
+Verify a release with [`PGP-KEY.asc`](PGP-KEY.asc) (fingerprint
 `ADE1CFE02922679A2DE57563AE472669ED78D899` — see
-[SECURITY.md](SECURITY.md#verifying-release-artifacts)).
+[SECURITY.md](SECURITY.md#verifying-release-artifacts)). The workspace's
+library crates (`sdoc-core`, `sdoc-render`, `sdoc-record`) are published
+to crates.io so the pipeline can be embedded in other tools.
 
 ### Platform support
 

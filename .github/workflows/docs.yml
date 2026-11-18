@@ -2,13 +2,16 @@ name: docs
 
 on:
   # The docs site is static; redeploy when it (or the release notes it
-  # reflects) changes on main.
+  # reflects) changes on main. The rustdoc API reference is generated from
+  # the crate sources, so `crates/**` and the workspace manifests count too.
   push:
     branches: [main]
     paths:
       - "docs/**"
       - "README.md"
       - "CHANGELOG.md"
+      - "crates/**"
+      - "Cargo.toml"
       - ".github/workflows/docs.yml"
 
   workflow_dispatch:
@@ -39,9 +42,23 @@ jobs:
             [ -f "$f" ] || { echo "docs/index.html references missing file: $f"; exit 1; }
           done
 
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the API reference (rustdoc)
+        run: cargo doc --workspace --no-deps
+
+      - name: Stage the site (docs + /api/)
+        run: |
+          rm -rf site
+          mkdir site
+          cp -r docs/. site/
+          cp -r target/doc site/api
+          du -sh site site/api
+
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: docs
+          path: site
       - id: deployment
         uses: actions/deploy-pages@v5

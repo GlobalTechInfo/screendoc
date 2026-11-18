@@ -185,6 +185,18 @@ jobs:
           done
           ls -l README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md docs/index.html
 
+  doc:
+    needs: [fmt]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: doc
+      - name: rustdoc gate (deny warnings and broken intra-doc links)
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
   msrv:
     runs-on: ubuntu-latest
     timeout-minutes: 30

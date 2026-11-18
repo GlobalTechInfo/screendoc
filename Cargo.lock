@@ -1982,7 +1982,7 @@ dependencies = [
 
 [[package]]
 name = "screendoc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2002,7 +2002,7 @@ dependencies = [
 
 [[package]]
 name = "sdoc-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aes-gcm",
  "criterion",
@@ -2022,7 +2022,7 @@ dependencies = [
 
 [[package]]
 name = "sdoc-record"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "portable-pty",
@@ -2032,7 +2032,7 @@ dependencies = [
 
 [[package]]
 name = "sdoc-render"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",

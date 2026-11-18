@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-18
+
+### Added
+
+- **Supply-chain provenance**: every release artifact is attested with
+  SLSA v1 provenance (Sigstore `actions/attest-build-provenance`), so
+  downstream users can verify `which CI job built this binary` without
+  trusting the release page.
+- **Debian and RPM packages** (`screendoc-*-x86_64-linux.deb` /
+  `.rpm`) ship alongside the tarballs; the release checksums, GPG
+  signatures and the installer all cover them.
+- **Published library crates**: `sdoc-core`, `sdoc-render` and
+  `sdoc-record` are now publishable on crates.io (per-crate READMEs and
+  LICENSE files included) for embedding the pipeline in other tools; the
+  CLI crate stays private.
+- **Rust API reference on GitHub Pages** (the docs site now builds
+  `cargo doc` and serves it under `/api/`), plus a CI `doc` job that
+  fails on any rustdoc warning or unresolved intra-doc link.
+  (Fixed two broken intra-doc links found by that gate.)
+
 ## [0.3.0] - 2026-11-17
 
 ### Fixed

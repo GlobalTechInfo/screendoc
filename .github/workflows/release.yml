@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: read
+  # SLSA provenance attestation (actions/attest-build-provenance) mints OIDC
+  # tokens for the Sigstore identity system.
+  id-token: write
 
 jobs:
   build:
@@ -67,6 +70,7 @@ jobs:
           esac
 
       - name: Package (unix)
+        id: package
         if: runner.os != 'Windows'
         run: |
           BIN=target/${{ matrix.target }}/release/screendoc
@@ -75,8 +79,10 @@ jobs:
           cp LICENSE pkg/screendoc/
           (cd pkg && tar czf ../${{ matrix.artifact }} screendoc)
           sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          echo "sha256=$(sha256sum ${{ matrix.artifact }} | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Package (windows)
+        id: package
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -87,6 +93,7 @@ jobs:
           Set-Content -Path "$env:Artifacts.sha256" -Value (
             ("{0}  {1}" -f (Get-FileHash $env:Artifacts).Hash.ToLower(), [IO.Path]::GetFileName($env:Artifacts))
           )
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "sha256=$((Get-FileHash $env:Artifacts).Hash.ToLower())"
         env:
           Artifacts: ${{ github.workspace }}/${{ matrix.artifact }}
 
@@ -97,6 +104,16 @@ jobs:
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
+
+      # SLSA provenance: the attestation is bound to the artifact's exact
+      # bytes (sha256 digest) and published alongside it; `gh attestation
+      # verify` / Sigstore consumers can check WHO built WHAT and on WHICH
+      # runner without trusting the release uploader.
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject: ${{ matrix.artifact }}=sha256:${{ steps.package.outputs.sha256 }}
+          predicate_template: slsa-provenance-v1
 
   static-musl:
     # Fully-static Linux binaries (no glibc dependency), for 64-bit and
@@ -150,11 +167,13 @@ jobs:
           fi
           echo "OK: $BIN is fully static (no PT_INTERP segment)"
       - name: Package
+        id: package
         run: |
           mkdir -p pkg/screendoc-static
           cp target/${{ matrix.target }}/release/screendoc pkg/screendoc-static/
           (cd pkg && tar czf ../${{ matrix.artifact }} screendoc-static)
           sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          echo "sha256=$(sha256sum ${{ matrix.artifact }} | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -162,9 +181,74 @@ jobs:
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject: ${{ matrix.artifact }}=sha256:${{ steps.package.outputs.sha256 }}
+          predicate_template: slsa-provenance-v1
+
+  distro:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the gnu x86_64 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: screendoc-x86_64-unknown-linux-gnu
+          path: dist
+
+      - name: Build .deb and .rpm packages
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          NAME=screendoc
+          TARBALL=$(find dist -name "${NAME}-x86_64-unknown-linux-gnu.tar.gz")
+          echo "packaging ${TARBALL} at v${VERSION}"
+
+          # --- .deb (dpkg-deb is preinstalled on the ubuntu runner) ---
+          PKG=${NAME}-${VERSION}-x86_64-linux-deb
+          mkdir -p "pkg/${PKG}/DEBIAN" "pkg/${PKG}/usr/local/bin"
+          BIN=$(tar tzf "$TARBALL" | grep '/screendoc$')
+          tar xzf "$TARBALL" -C "pkg/${PKG}" --strip-components=1
+          rm -f "pkg/${PKG}/usr/local/bin/LICENSE"
+          printf '%s\n' \
+            "Package: ${NAME}" \
+            "Version: ${VERSION}" \
+            "Section: utils" \
+            "Priority: optional" \
+            "Architecture: amd64" \
+            "Maintainer: ${NAME} Contributors" \
+            "Depends: bash, ffmpeg" \
+            "Description: Record terminal sessions and render them to GIF/MP4/WebM" \
+            " ${NAME} records a command, a running shell, or tmux panes as an" \
+            " asciinema-compatible event journal (raw byte stream plus command and" \
+            " chapter markers) and renders it to GIF, MP4, WebM/AV1, still PNGs," \
+            " and a self-contained HTML player." \
+            > "pkg/${PKG}/DEBIAN/control"
+          dpkg-deb --root-owner-group -b "pkg/${PKG}" "${NAME}-${VERSION}-x86_64-linux.deb"
+          dpkg-deb --info "${NAME}-${VERSION}-x86_64-linux.deb"
+
+          # --- .rpm (alien converts the verified .deb; output lands in CWD) ---
+          sudo apt-get update -y
+          sudo apt-get install -y alien
+          alien -r "${NAME}-${VERSION}-x86_64-linux.deb"
+          RPM=$(ls "${NAME}"-*.rpm)
+          echo "built ${NAME}-${VERSION}-x86_64-linux.deb and ${RPM}"
+          mv "${NAME}-${VERSION}-x86_64-linux.deb" dist/
+          mv "$RPM" "dist/${NAME}-${VERSION}-x86_64-linux.rpm"
+
+      - name: Upload distro artifacts
+        uses: actions/upload-artifact@v8
+        with:
+          name: distro
+          path: |
+            dist/screendoc-*-x86_64-linux.deb
+            dist/screendoc-*-x86_64-linux.rpm
 
   publish:
-    needs: [build, static-musl]
+    needs: [build, static-musl, distro]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -182,7 +266,7 @@ jobs:
           # The release's public signing key ships as an asset so anyone
           # can verify the artifacts without needing the repo.
           cp PGP-KEY.asc release/
-          (cd release && sha256sum *.tar.gz *.zip > SHA256SUMS)
+          (cd release && sha256sum *.tar.gz *.zip *.deb *.rpm > SHA256SUMS)
           for f in release/*; do echo "  - $f"; done
 
       - name: Generate SBOM (CycloneDX 1.6)
@@ -213,11 +297,11 @@ jobs:
           # signature fails verification (reproduced locally with gpg 2.4.8).
           # Sign each file explicitly in a loop instead, armored, and
           # self-verify every signature before publishing.
-          for f in *.tar.gz *.zip SHA256SUMS; do
+          for f in *.tar.gz *.zip *.deb *.rpm SHA256SUMS; do
             gpg --batch --yes --pinentry-mode loopback --armor --digest-algo SHA512 \
               --detach-sign "$f"
           done
-          for f in *.tar.gz *.zip SHA256SUMS; do
+          for f in *.tar.gz *.zip *.deb *.rpm SHA256SUMS; do
             gpg --batch --verify "$f.asc" "$f"
           done
           ls *.asc

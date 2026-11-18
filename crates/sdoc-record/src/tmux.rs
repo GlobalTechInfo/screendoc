@@ -12,8 +12,8 @@ use sdoc_core::{
 
 /// A running tmux pane recording.
 ///
-/// Created by [`start`], fed by repeated [`poll`] calls, and finished with
-/// [`stop`].
+/// Created by [`start`], fed by repeated [`TmuxRecorder::poll`] calls, and
+/// finished with [`TmuxRecorder::stop`].
 pub struct TmuxRecorder {
     session: Session,
     target: String,
