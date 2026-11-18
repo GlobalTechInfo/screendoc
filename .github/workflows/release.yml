@@ -244,7 +244,7 @@ jobs:
           mv "$RPM" "dist/${NAME}-${VERSION}-x86_64-linux.rpm"
 
       - name: Upload distro artifacts
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: distro
           path: |
