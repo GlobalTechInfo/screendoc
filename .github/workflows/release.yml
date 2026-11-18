@@ -70,7 +70,7 @@ jobs:
           esac
 
       - name: Package (unix)
-        id: package
+        id: package-unix
         if: runner.os != 'Windows'
         run: |
           BIN=target/${{ matrix.target }}/release/screendoc
@@ -82,7 +82,7 @@ jobs:
           echo "sha256=$(sha256sum ${{ matrix.artifact }} | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Package (windows)
-        id: package
+        id: package-windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -109,10 +109,12 @@ jobs:
       # bytes (sha256 digest) and published alongside it; `gh attestation
       # verify` / Sigstore consumers can check WHO built WHAT and on WHICH
       # runner without trusting the release uploader.
+      # Only one of package-unix / package-windows runs per matrix entry
+      # (the other is skipped), so coalesce the two output slots.
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@v4
         with:
-          subject: ${{ matrix.artifact }}=sha256:${{ steps.package.outputs.sha256 }}
+          subject: ${{ matrix.artifact }}=sha256:${{ steps.package-unix.outputs.sha256 || steps.package-windows.outputs.sha256 }}
           predicate_template: slsa-provenance-v1
 
   static-musl:
