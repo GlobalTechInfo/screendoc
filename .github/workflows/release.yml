@@ -200,7 +200,7 @@ jobs:
       - name: Download the gnu x86_64 artifact
         uses: actions/download-artifact@v8
         with:
-          name: screendoc-x86_64-unknown-linux-gnu
+          name: screendoc-x86_64-unknown-linux-gnu.tar.gz
           path: dist
 
       - name: Build .deb and .rpm packages
