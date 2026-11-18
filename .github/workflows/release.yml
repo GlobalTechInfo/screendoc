@@ -8,8 +8,10 @@ on:
 permissions:
   contents: read
   # SLSA provenance attestation (actions/attest-build-provenance) mints OIDC
-  # tokens for the Sigstore identity system.
+  # tokens for the Sigstore identity system, and persists the result via the
+  # attestations REST API, which the GITHUB_TOKEN must be able to write.
   id-token: write
+  attestations: write
 
 jobs:
   build:
