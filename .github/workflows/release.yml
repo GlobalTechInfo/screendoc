@@ -214,8 +214,12 @@ jobs:
           # --- .deb (dpkg-deb is preinstalled on the ubuntu runner) ---
           PKG=${NAME}-${VERSION}-x86_64-linux-deb
           mkdir -p "pkg/${PKG}/DEBIAN" "pkg/${PKG}/usr/local/bin"
-          BIN=$(tar tzf "$TARBALL" | grep '/screendoc$')
-          tar xzf "$TARBALL" -C "pkg/${PKG}" --strip-components=1
+          BIN=$(tar tzf "$TARBALL" | grep '/screendoc$' | head -1)
+          test -n "$BIN"
+          # Extract into usr/local/bin so the package installs
+          # /usr/local/bin/screendoc, not /screendoc (the tarball's
+          # top-level screendoc/ dir is stripped).
+          tar xzf "$TARBALL" -C "pkg/${PKG}/usr/local/bin" --strip-components=1
           rm -f "pkg/${PKG}/usr/local/bin/LICENSE"
           printf '%s\n' \
             "Package: ${NAME}" \

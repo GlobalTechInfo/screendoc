@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-11-18
+
+### Fixed
+
+- **deb/rpm package layout** (v0.4.0 shipped- bug): the distro job
+  extracted the release tarball into the package root, so the .deb/.rpm
+  installed the binary at `/screendoc` (filesystem root) with an empty
+  `/usr/local/bin/` directory. Now extracted straight into
+  `usr/local/bin/` → packages install `/usr/local/bin/screendoc` with
+  no stray files.
+
 ## [0.4.0] - 2026-11-18
 
 ### Added
