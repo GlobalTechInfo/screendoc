@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file, following
 
 ## [0.4.2] - 2026-11-18
 
+### Added
+
+- **Multi-arch distro packages**: the release now ships .deb/.rpm for all
+  supported Linux architectures — `screendoc-<ver>-{x86_64,aarch64}-linux.{deb,rpm}`
+  (dynamic gnu builds, `Depends: bash, ffmpeg`) and
+  `screendoc-<ver>-{i686,armv7}-linux.{deb,rpm}` (fully-static musl builds,
+  no runtime dependencies). 32-bit/ARMv7 have no glibc distros on the
+  release runners, so they wrap the portable static tarballs; aarch64 wraps
+  the dynamic build (its static variant stays available as a tarball).
+
 ### Fixed
 
 - **Homebrew formula staleness**: `packaging/homebrew/screendoc.rb` had
@@ -21,6 +31,8 @@ All notable changes to this project are documented in this file, following
 
 - README: Homebrew install instructions (from the in-repo formula) and
   note that the formula is auto-backfilled by the release workflow.
+- Distro package naming now includes the architecture:
+  `screendoc-<ver>-{x86_64,aarch64,i686,armv7}-linux.{deb,rpm}`.
 
 ## [0.4.1] - 2026-11-18
 

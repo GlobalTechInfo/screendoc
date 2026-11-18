@@ -86,16 +86,23 @@ No glibc? Build a fully-static Linux binary: `./scripts/build-static.sh`
 `scripts\uninstall.ps1 [-Purge]` (data in `~/.screendoc` is kept unless
 you purge). Packages: a Homebrew formula in `packaging/` (auto-backfilled
 by the release workflow after every tag), Debian/RPM
-packages (Linux x86_64), GitHub releases (Linux gnu x86_64/aarch64 +
+packages (Linux x86_64/aarch64/i686/armv7 — i686/armv7 are fully-static,
+dependency-free builds), GitHub releases (Linux gnu x86_64/aarch64 +
 static musl x86_64/i686/armv7/aarch64 (Termux), macOS, Windows;
 SHA-256 checksums, GPG-signed, SLSA provenance attestations) cut by
 `scripts/release.sh <version>` / the tag-triggered workflow. Distro
 packages:
 
 ```sh
-brew install ./packaging/homebrew/screendoc.rb        # Homebrew (macOS / Linux)
-sudo apt install ./screendoc_<ver>-x86_64-linux.deb   # Debian / Ubuntu
-sudo rpm -i screendoc-<ver>-x86_64-linux.rpm         # RHEL / Fedora
+brew install ./packaging/homebrew/screendoc.rb                # Homebrew (macOS / Linux)
+sudo apt install ./screendoc_<ver>-x86_64-linux.deb           # Debian / Ubuntu (amd64)
+sudo apt install ./screendoc_<ver>-aarch64-linux.deb         # Debian / Ubuntu (arm64)
+sudo apt install ./screendoc_<ver>-i686-linux.deb             # 32-bit (static, dep-free)
+sudo apt install ./screendoc_<ver>-armv7-linux.deb           # ARMv7 (static, dep-free)
+sudo rpm -i screendoc-<ver>-x86_64-linux.rpm                 # RHEL / Fedora (x86_64)
+sudo rpm -i screendoc-<ver>-aarch64-linux.rpm                # RHEL / Fedora (aarch64)
+sudo rpm -i screendoc-<ver>-i686-linux.rpm                   # 32-bit (static, dep-free)
+sudo rpm -i screendoc-<ver>-armv7-linux.rpm                  # ARMv7 (static, dep-free)
 ```
 
 Verify release provenance with Sigstore:

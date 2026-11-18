@@ -192,15 +192,42 @@ jobs:
           subject-digest: sha256:${{ steps.package.outputs.sha256 }}
 
   distro:
-    needs: [build]
+    needs: [build, static-musl]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Four distro packages, one per supported Linux arch:
+          #   x86_64/aarch64 wrap the gnu (dynamic) tarballs;
+          #   i686/armv7 wrap the fully-static musl tarballs (no 32-bit
+          #   glibc distros exist on the runners, and static musl is the
+          #   portable option there). Static packages carry no Depends:
+          #   the binary is self-contained (ffmpeg stays an optional
+          #   runtime tool, as with the tarballs).
+          - arch: x86_64
+            artifact: screendoc-x86_64-unknown-linux-gnu.tar.gz
+            deb_arch: amd64
+            depends: "bash, ffmpeg"
+          - arch: aarch64
+            artifact: screendoc-aarch64-unknown-linux-gnu.tar.gz
+            deb_arch: arm64
+            depends: "bash, ffmpeg"
+          - arch: i686
+            artifact: screendoc-i686-linux-musl.tar.gz
+            deb_arch: i386
+            depends: ""
+          - arch: armv7
+            artifact: screendoc-armv7-linux-musleabihf.tar.gz
+            deb_arch: armhf
+            depends: ""
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download the gnu x86_64 artifact
+      - name: Download the ${{ matrix.arch }} tarball
         uses: actions/download-artifact@v8
         with:
-          name: screendoc-x86_64-unknown-linux-gnu.tar.gz
+          name: ${{ matrix.artifact }}
           path: dist
 
       - name: Build .deb and .rpm packages
@@ -208,52 +235,55 @@ jobs:
           set -euo pipefail
           VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           NAME=screendoc
-          TARBALL=$(find dist -name "${NAME}-x86_64-unknown-linux-gnu.tar.gz")
-          echo "packaging ${TARBALL} at v${VERSION}"
+          ARCH=${{ matrix.arch }}
+          TARBALL=$(find dist -name "${{ matrix.artifact }}")
+          echo "packaging ${TARBALL} at v${VERSION} for ${ARCH}"
 
           # --- .deb (dpkg-deb is preinstalled on the ubuntu runner) ---
-          PKG=${NAME}-${VERSION}-x86_64-linux-deb
+          PKG=${NAME}-${VERSION}-${ARCH}-linux-deb
           mkdir -p "pkg/${PKG}/DEBIAN" "pkg/${PKG}/usr/local/bin"
           BIN=$(tar tzf "$TARBALL" | grep '/screendoc$' | head -1)
           test -n "$BIN"
           # Extract into usr/local/bin so the package installs
           # /usr/local/bin/screendoc, not /screendoc (the tarball's
-          # top-level screendoc/ dir is stripped).
+          # top-level dir is stripped).
           tar xzf "$TARBALL" -C "pkg/${PKG}/usr/local/bin" --strip-components=1
           rm -f "pkg/${PKG}/usr/local/bin/LICENSE"
-          printf '%s\n' \
-            "Package: ${NAME}" \
-            "Version: ${VERSION}" \
-            "Section: utils" \
-            "Priority: optional" \
-            "Architecture: amd64" \
-            "Maintainer: ${NAME} Contributors" \
-            "Depends: bash, ffmpeg" \
-            "Description: Record terminal sessions and render them to GIF/MP4/WebM" \
-            " ${NAME} records a command, a running shell, or tmux panes as an" \
-            " asciinema-compatible event journal (raw byte stream plus command and" \
-            " chapter markers) and renders it to GIF, MP4, WebM/AV1, still PNGs," \
-            " and a self-contained HTML player." \
-            > "pkg/${PKG}/DEBIAN/control"
-          dpkg-deb --root-owner-group -b "pkg/${PKG}" "${NAME}-${VERSION}-x86_64-linux.deb"
-          dpkg-deb --info "${NAME}-${VERSION}-x86_64-linux.deb"
+          {
+            printf '%s\n' \
+              "Package: ${NAME}" \
+              "Version: ${VERSION}" \
+              "Section: utils" \
+              "Priority: optional" \
+              "Architecture: ${{ matrix.deb_arch }}" \
+              "Maintainer: ${NAME} Contributors"
+            [ -n "${{ matrix.depends }}" ] && echo "Depends: ${{ matrix.depends }}"
+            printf '%s\n' \
+              "Description: Record terminal sessions and render them to GIF/MP4/WebM" \
+              " ${NAME} records a command, a running shell, or tmux panes as an" \
+              " asciinema-compatible event journal (raw byte stream plus command and" \
+              " chapter markers) and renders it to GIF, MP4, WebM/AV1, still PNGs," \
+              " and a self-contained HTML player."
+          } > "pkg/${PKG}/DEBIAN/control"
+          dpkg-deb --root-owner-group -b "pkg/${PKG}" "${NAME}-${VERSION}-${ARCH}-linux.deb"
+          dpkg-deb --info "${NAME}-${VERSION}-${ARCH}-linux.deb"
 
           # --- .rpm (alien converts the verified .deb; output lands in CWD) ---
           sudo apt-get update -y
           sudo apt-get install -y alien
-          alien -r "${NAME}-${VERSION}-x86_64-linux.deb"
+          alien -r "${NAME}-${VERSION}-${ARCH}-linux.deb"
           RPM=$(ls "${NAME}"-*.rpm)
-          echo "built ${NAME}-${VERSION}-x86_64-linux.deb and ${RPM}"
-          mv "${NAME}-${VERSION}-x86_64-linux.deb" dist/
-          mv "$RPM" "dist/${NAME}-${VERSION}-x86_64-linux.rpm"
+          echo "built ${NAME}-${VERSION}-${ARCH}-linux.deb and ${RPM}"
+          mv "${NAME}-${VERSION}-${ARCH}-linux.deb" dist/
+          mv "$RPM" "dist/${NAME}-${VERSION}-${ARCH}-linux.rpm"
 
       - name: Upload distro artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: distro
+          name: distro-${{ matrix.arch }}
           path: |
-            dist/screendoc-*-x86_64-linux.deb
-            dist/screendoc-*-x86_64-linux.rpm
+            dist/screendoc-*-${{ matrix.arch }}-linux.deb
+            dist/screendoc-*-${{ matrix.arch }}-linux.rpm
 
   publish:
     needs: [build, static-musl, distro]
