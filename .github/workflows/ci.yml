@@ -217,15 +217,15 @@ jobs:
   udeps:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # cargo-udeps sets RUSTFLAGS=-Z binary-dep-depinfo (nightly-only).
+    # The repo's rust-toolchain.toml pins stable, so RUSTUP_TOOLCHAIN
+    # (highest precedence) is used to force every inner cargo/rustc
+    # invocation onto nightly.
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     steps:
       - uses: actions/checkout@v7
-      # cargo-udeps sets RUSTFLAGS=-Z binary-dep-depinfo, which is a
-      # nightly-only flag, so the job runs on the nightly toolchain.
-      # `default: true` makes the inner cargo/rustc invocations nightly too,
-      # not just the toolchain that installed cargo-udeps.
       - uses: dtolnay/rust-toolchain@nightly
-        with:
-          default: true
       - uses: Swatinem/rust-cache@v2
         with:
           key: udeps
