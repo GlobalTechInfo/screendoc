@@ -6,7 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-publish = false
+repository = "https://github.com/GlobalTechInfo/screendoc"
+documentation = "https://globaltechinfo.github.io/screendoc/api/sdoc_core/index.html"
 
 [lints]
 workspace = true
@@ -33,4 +34,12 @@ workspace = true
  ctrlc = "=3.4.2"
 
 [dev-dependencies]
+# html_reports only: no rayon/plotters, so the CI bench job stays fast.
+criterion = { version = "=0.8.2", default-features = false, features = [
+    "html_reports",
+] }
 tempfile = "=3.27.0"
+
+[[bench]]
+name = "core"
+harness = false

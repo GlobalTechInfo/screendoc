@@ -12,8 +12,8 @@ use sdoc_core::{
 
 /// A running tmux pane recording.
 ///
-/// Created by [`start`], fed by repeated [`poll`] calls, and finished with
-/// [`stop`].
+/// Created by [`start`], fed by repeated [`TmuxRecorder::poll`] calls, and
+/// finished with [`TmuxRecorder::stop`].
 pub struct TmuxRecorder {
     session: Session,
     target: String,
@@ -135,7 +135,12 @@ pub fn start(target: Option<&str>, encrypt: bool) -> Result<TmuxRecorder> {
         bail!("tmux pipe-pane failed for target `{resolved}`");
     }
 
-    let cast = session.cast_writer(&Size { cols, rows })?;
+    let mut cast = session.cast_writer(&Size { cols, rows })?;
+    // Persist the cast header immediately. `raw.cast` is only finalized by
+    // `cast.finish()` in `stop()`, which a separate-process rescue
+    // (`screendoc stop`) never triggers; flushing up front guarantees a valid
+    // (if incomplete) cast on disk even if the recorder is killed.
+    cast.flush()?;
     session.append_event(&Event::SessionStart {
         at_ms: 0,
         shell: None,
@@ -245,6 +250,9 @@ impl TmuxRecorder {
             let (clean, markers) = self.demuxer.feed(&chunk);
             if !clean.is_empty() {
                 self.cast.output(at_ms, &String::from_utf8_lossy(&clean))?;
+                // Incremental persist: a recorder killed between polls must
+                // not lose already-demuxed output (see the cast-header note).
+                self.cast.flush()?;
             }
             for m in markers {
                 n += self.append_marker_events(&m, at_ms)?;

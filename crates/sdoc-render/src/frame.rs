@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
+use ab_glyph::{Font, FontRef, ScaleFont, point};
 use anyhow::Result;
 use image::RgbaImage;
-use rusttype::{Font, Scale, point};
+use sdoc_core::Size;
 use vt100::{Color, Parser, Screen};
 
 /// The embedded monospace font used to rasterize terminal cells.
@@ -110,8 +111,8 @@ struct Cell {
 
 /// A terminal frame rasterizer backed by a cached glyph atlas.
 pub struct Rasterizer {
-    font: Font<'static>,
-    scale: Scale,
+    font: FontRef<'static>,
+    px: f32,
     ascent: f32,
     opts: FrameOptions,
     /// Cache of glyph coverage per character.
@@ -134,11 +135,10 @@ impl Rasterizer {
     /// Create a rasterizer for the given options.
     pub fn new(opts: FrameOptions) -> Result<Self> {
         let font =
-            Font::try_from_bytes(FONT).ok_or_else(|| anyhow::anyhow!("invalid embedded font"))?;
+            FontRef::try_from_slice(FONT).map_err(|_| anyhow::anyhow!("invalid embedded font"))?;
         let px = opts.cell_h as f32 * 0.8;
-        let scale = Scale::uniform(px);
-        let ascent = font.v_metrics(scale).ascent;
-        Ok(Self { font, scale, ascent, opts, glyphs: HashMap::new() })
+        let ascent = font.as_scaled(px).ascent();
+        Ok(Self { font, px, ascent, opts, glyphs: HashMap::new() })
     }
 
     /// Get (and lazily rasterize) the coverage mask for a character.
@@ -153,15 +153,17 @@ impl Rasterizer {
 
     /// Rasterize a single glyph into a coverage mask.
     fn rasterize_glyph(&self, ch: char) -> Option<GlyphRaster> {
-        let positioned = self.font.glyph(ch).scaled(self.scale).positioned(point(0.0, self.ascent));
-        let bb = positioned.pixel_bounding_box()?;
-        let w = (bb.max.x - bb.min.x).max(0) as u32;
-        let h = (bb.max.y - bb.min.y).max(0) as u32;
+        let glyph =
+            self.font.glyph_id(ch).with_scale_and_position(self.px, point(0.0, self.ascent));
+        let outlined = self.font.outline_glyph(glyph)?;
+        let bb = outlined.px_bounds();
+        let w = bb.width().max(0.0) as u32;
+        let h = bb.height().max(0.0) as u32;
         if w == 0 || h == 0 {
             return None;
         }
         let mut mask = vec![0u8; (w * h) as usize];
-        positioned.draw(|gx, gy, cov| {
+        outlined.draw(|gx, gy, cov| {
             if gx < w && gy < h {
                 let idx = (gy as usize) * (w as usize) + gx as usize;
                 let v = (cov * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -170,7 +172,7 @@ impl Rasterizer {
                 }
             }
         });
-        Some(GlyphRaster { x: bb.min.x, y: bb.min.y, w, mask })
+        Some(GlyphRaster { x: bb.min.x as i32, y: bb.min.y as i32, w, mask })
     }
 
     /// Rasterize the current screen into a fresh frame image.
@@ -445,6 +447,19 @@ pub fn parse_cast(text: &str) -> Result<Vec<CastEvent>> {
     Ok(out)
 }
 
+/// Read the terminal size recorded in a cast file's header line, if the
+/// writer embedded one. Our recorder writes `"terminal_width"` /
+/// `"terminal_height"`; stock asciinema headers omit them, in which case
+/// `None` is returned and the caller falls back to its default size.
+pub fn parse_cast_header_size(text: &str) -> Option<Size> {
+    let line = text.lines().next()?.trim();
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let o = v.as_object()?;
+    let cols = o.get("terminal_width")?.as_u64()? as u16;
+    let rows = o.get("terminal_height")?.as_u64()? as u16;
+    (cols > 0 && rows > 0).then_some(Size { cols, rows })
+}
+
 /// Feed a run of output/resize events into a parser up to (and including)
 /// the event at index `last`.
 /// Feed a batch of newly-arrived cast events into the terminal parser.
@@ -477,6 +492,22 @@ fn parse_resize(s: &str) -> Option<(u16, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_cast_header_size_reads_recorded_dimensions() {
+        let text = r#"{"version":2,"terminal_width":80,"terminal_height":24}"#.to_string()
+            + "\n[\"0.000\",\"o\",\"hi\"]\n";
+        assert_eq!(parse_cast_header_size(&text), Some(Size { cols: 80, rows: 24 }));
+    }
+
+    #[test]
+    fn parse_cast_header_size_missing_in_stock_asciinema() {
+        // Stock asciinema v2 headers carry no size: renderers must fall back.
+        let text = r#"{"version":2,"width":80,"height":24}"#.to_string() + "\n";
+        assert_eq!(parse_cast_header_size(&text), None);
+        assert_eq!(parse_cast_header_size(""), None);
+        assert_eq!(parse_cast_header_size("not json\n[0.0,\"o\",\"x\"]"), None);
+    }
 
     #[test]
     fn parses_cast_events() {

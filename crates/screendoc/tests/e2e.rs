@@ -178,8 +178,98 @@ fn wrapper_render_gif_and_mp4_when_ffmpeg_present() {
     assert!(mp4.exists(), "mp4 missing");
     assert!(gif.metadata().map(|m| m.len() > 0).unwrap_or(false));
     assert!(mp4.metadata().map(|m| m.len() > 0).unwrap_or(false));
+    // The recorded session is 30x5, so the rendered gif must keep the
+    // recorded size instead of falling back to the 120x30 default.
+    let (w, h) = gif_header_size(&gif).expect("gif header");
+    assert_eq!((w, h), (30 * 12, 5 * 24 + 22), "gif dims must match the recorded 30x5 session");
+    assert!(gif_frame_count(&gif) >= 2, "gif must have at least 2 frames");
     let _ = std::fs::remove_dir_all(&out);
     cleanup(&[id]);
+}
+
+/// A session that captured no terminal output must still render a
+/// *playable* video: the old bug produced a single-frame 0.07 s gif.
+#[test]
+fn wrapper_render_empty_session_yields_playable_video_when_ffmpeg_present() {
+    let _g = lock();
+    if find_in_path("ffmpeg").is_none() {
+        eprintln!("SKIP: ffmpeg not installed");
+        return;
+    }
+    let session = run_and_capture(&["screendoc", "record", "--size", "30x5", "true"]);
+    let id = session.id().to_string();
+    let out = std::env::temp_dir().join(format!("sdoc-e2e-empty-{id}"));
+    let _ = std::fs::remove_dir_all(&out);
+    let code = run_cli(&[
+        "screendoc",
+        "render",
+        &id,
+        "--gif",
+        "--mp4",
+        "--out",
+        out.to_string_lossy().as_ref(),
+    ]);
+    assert_eq!(code, 0);
+    let gif = out.join(format!("{id}.gif"));
+    assert!(gif.exists(), "empty-session gif missing");
+    let frames = gif_frame_count(&gif);
+    // min_playback floors a zero-length session to 1.0 s, so at the
+    // default gif fps the result must have well more than one frame.
+    assert!(frames >= 2, "empty-session gif has only {frames} frame(s)");
+    let _ = std::fs::remove_dir_all(&out);
+    cleanup(&[id]);
+}
+
+/// A non-default recorded size must flow through to the rendered stills.
+#[test]
+fn wrapper_render_stills_keep_recorded_size_when_ffmpeg_present() {
+    let _g = lock();
+    if find_in_path("ffmpeg").is_none() {
+        eprintln!("SKIP: ffmpeg not installed");
+        return;
+    }
+    let session = run_and_capture(&[
+        "screendoc",
+        "record",
+        "--size",
+        "40x8",
+        "echo",
+        "stills test",
+        "exit",
+        "0",
+    ]);
+    let id = session.id().to_string();
+    let out = std::env::temp_dir().join(format!("sdoc-e2e-stills-{id}"));
+    let _ = std::fs::remove_dir_all(&out);
+    let code =
+        run_cli(&["screendoc", "render", &id, "--frames", "--out", out.to_string_lossy().as_ref()]);
+    assert_eq!(code, 0);
+    let png = out.join(format!("{id}-final.png"));
+    assert!(png.exists(), "final still missing");
+    let (w, h) = image::image_dimensions(&png).expect("still dims");
+    assert_eq!((w, h), (40 * 12, 8 * 24 + 22), "still dims must match the recorded 40x8 session");
+    let _ = std::fs::remove_dir_all(&out);
+    cleanup(&[id]);
+}
+
+/// Read the GIF logical-screen dimensions from the file header.
+fn gif_header_size(path: &std::path::Path) -> Option<(u32, u32)> {
+    let data = std::fs::read(path).ok()?;
+    if data.len() < 10 || &data[0..3] != b"GIF" {
+        return None;
+    }
+    Some((
+        u16::from_le_bytes([data[6], data[7]]) as u32,
+        u16::from_le_bytes([data[8], data[9]]) as u32,
+    ))
+}
+
+/// Count a GIF's frames (dev-dependency `image`).
+fn gif_frame_count(path: &std::path::Path) -> usize {
+    let data = std::fs::read(path).expect("read gif");
+    let decoder =
+        image::codecs::gif::GifDecoder::new(std::io::Cursor::new(data)).expect("gif decode");
+    image::AnimationDecoder::into_frames(decoder).count()
 }
 
 #[test]
@@ -715,6 +805,48 @@ fn tmux_stop_after_pane_death_still_finalizes() {
     cleanup(&[id]);
 }
 
+/// A tmux recorder that dies before `stop()` (a separate-terminal
+/// `screendoc stop` + a killed process) must still leave a usable cast
+/// on disk — regression: the cast writer only flushed at finalization,
+/// so a killed recorder left `raw.cast` empty and blank video.
+#[test]
+fn tmux_dropped_recorder_still_persists_cast() {
+    let _g = lock();
+    if !sdoc_record::tmux::tmux_available() {
+        eprintln!("SKIP: tmux not installed");
+        return;
+    }
+    let name = format!("sdoc-drop-{}", std::process::id());
+    let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &name]).status();
+    let _ = std::process::Command::new("tmux")
+        .args(["new-session", "-d", "-s", &name, "-x", "50", "-y", "10", "bash"])
+        .status();
+    std::thread::sleep(std::time::Duration::from_millis(400));
+
+    let mut rec = sdoc_record::tmux::start(Some(&name), false).expect("start");
+    let id = rec.id().to_string();
+    let _ = std::process::Command::new("tmux")
+        .args(["send-keys", "-t", &name, "echo killed-recorder-check", "Enter"])
+        .status();
+    for _ in 0..5 {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let _ = rec.poll();
+    }
+    // Simulate SIGKILL: the recorder dies without stop(), so cast.finish()
+    // never runs and any unflushed buffer is lost.
+    std::mem::forget(rec);
+    let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &name]).status();
+
+    let s = Session::open(&id).expect("open");
+    let bytes = std::fs::read(s.cast_path()).expect("cast bytes on disk");
+    assert!(!bytes.is_empty(), "raw.cast must survive a killed recorder");
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("\"version\":2"), "cast header must be persisted");
+    assert!(text.contains("killed-recorder-check"), "flushed output must be persisted");
+    let _ = Session::clear_active(&id);
+    cleanup(&[id]);
+}
+
 #[test]
 fn serve_returns_404_for_unknown_routes() {
     let _g = lock();
@@ -850,7 +982,55 @@ fn encrypted_record_roundtrips() {
     // The transparent read path returns the plaintext.
     let cast = s.read_cast_text().expect("cast text");
     assert!(cast.contains(&marker), "transparent read must decrypt");
+    // The event journal must also read back line-by-line after
+    // decryption (regression: records were appended without newlines,
+    // so N events collapsed into one unparseable line).
+    let events = s.read_events().expect("events decrypt");
+    assert!(!events.is_empty(), "encrypted session must have events");
 
+    cleanup(&[id]);
+}
+
+/// `record --encrypt` must not persist the command as `meta.title`:
+/// meta.json is always plaintext, so a title derived from the command
+/// would leak it at rest (regression for the encrypt-title leak).
+#[test]
+fn encrypted_wrapper_meta_omits_command_title() {
+    let _g = lock();
+    let marker = format!("entitle-{}", std::process::id());
+    // A single compound argument so `command.first()` is the whole
+    // command string — the shape that used to leak into meta.json.
+    let compound = format!("sh -c \"echo {marker}\"");
+    let session =
+        run_and_capture(&["screendoc", "record", "--size", "40x6", "--encrypt", &compound]);
+    let id = session.id().to_string();
+    let meta = session.read_meta().expect("meta");
+    assert!(
+        meta.title.is_none(),
+        "encrypted session must not persist the command as title, got {:?}",
+        meta.title
+    );
+    // The command text must not appear in the always-plaintext meta file
+    // either.
+    let meta_raw = std::fs::read(session.meta_path()).expect("meta bytes");
+    let meta_text = String::from_utf8_lossy(&meta_raw);
+    assert!(
+        !meta_text.contains(&marker),
+        "encrypted session meta.json must not contain the command"
+    );
+    cleanup(&[id]);
+}
+
+/// Non-encrypted wrapper sessions keep the first word as title by design
+/// (the session is not at-rest confidential).
+#[test]
+fn unencrypted_wrapper_meta_keeps_title() {
+    let _g = lock();
+    let session =
+        run_and_capture(&["screendoc", "record", "--size", "40x6", "echo", "ttl", "exit", "0"]);
+    let id = session.id().to_string();
+    let meta = session.read_meta().expect("meta");
+    assert_eq!(meta.title.as_deref(), Some("echo"));
     cleanup(&[id]);
 }
 

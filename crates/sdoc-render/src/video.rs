@@ -7,7 +7,8 @@ use sdoc_core::{Config, Event, Session, Size};
 use vt100::Parser;
 
 use crate::frame::{
-    CastEvent, ColorTheme, FrameOptions, OverlaySpec, Rasterizer, parse_cast, step_parser,
+    CastEvent, ColorTheme, FrameOptions, OverlaySpec, Rasterizer, parse_cast,
+    parse_cast_header_size, step_parser,
 };
 
 /// Which derived artifacts to produce.
@@ -92,6 +93,17 @@ pub fn render(session: &Session, req: &RenderRequest, cfg: &Config) -> Result<Re
                 session.id()
             );
         }
+        // Surface degenerate recordings: a session whose cast carries no
+        // terminal output would otherwise render to an unplayable file
+        // with no explanation.
+        if let Ok(cast_events) = load_cast(session)
+            && cast_events.iter().all(|e| e.ty != "o")
+        {
+            eprintln!(
+                "⚠ session {} captured no terminal output — the video will show a blank terminal",
+                session.id()
+            );
+        }
         if req.gif || req.mp4 || req.webm || req.av1 || req.chapters {
             require_ffmpeg()?;
         }
@@ -166,7 +178,17 @@ fn playback_total(session: &Session, req: &RenderRequest, cfg: &Config) -> Resul
     // their span.
     let meta = session.read_meta()?;
     let wall = meta.duration_ms.map(|d| d as f64 / 1000.0).unwrap_or(0.0);
-    Ok(total.max(wall))
+    // A completely degenerate session (no captured output AND no
+    // wall-clock duration, e.g. a header-only cast) would otherwise
+    // collapse to a single unplayable frame; give it a 1s minimum.
+    Ok(min_playback(total.max(wall)))
+}
+
+/// Floor a playback duration to a 1s minimum when it is exactly zero
+/// (degenerate session). Real short sessions are left untouched so
+/// their timing is not distorted.
+fn min_playback(t: f64) -> f64 {
+    if t > 0.0 { t } else { 1.0 }
 }
 
 /// Rasterize a time range `[start_s, end_s)` of a session into frames.
@@ -182,17 +204,19 @@ fn rasterize_range(
 ) -> Result<Vec<RgbaImage>> {
     let idle_limit = req.idle_limit.unwrap_or(cfg.idle_limit);
     let events = session.read_events()?;
+    let fallback = fallback_size(session, &events);
     let cast_events = load_cast(session)?;
     let raw: Vec<f64> = cast_events.iter().map(|e| e.t).collect();
     let comp = compress_idle(&raw, idle_limit);
     // The timeline is extended to the session's wall-clock duration (see
     // `playback_total`) so chapters in the idle tail still have a span.
     let meta = session.read_meta()?;
-    let total = comp
-        .last()
-        .copied()
-        .unwrap_or(0.0)
-        .max(meta.duration_ms.map(|d| d as f64 / 1000.0).unwrap_or(0.0));
+    let total = min_playback(
+        comp.last()
+            .copied()
+            .unwrap_or(0.0)
+            .max(meta.duration_ms.map(|d| d as f64 / 1000.0).unwrap_or(0.0)),
+    );
 
     let speed = req.speed.unwrap_or(cfg.speed);
     let fps = req.fps.unwrap_or(cfg.fps);
@@ -203,7 +227,7 @@ fn rasterize_range(
     let frames_total =
         (((span_end - span_start) / speed.max(1e-9)) * fps as f64).ceil() as usize + 1;
 
-    let size = terminal_size(&cast_events);
+    let size = terminal_size(&cast_events, &fallback);
     let fopts = FrameOptions {
         cols: size.cols,
         rows: size.rows,
@@ -300,14 +324,33 @@ fn chapter_start_at(events: &[Event], at_ms: f64) -> f64 {
     latest
 }
 
-/// The terminal size implied by the last resize event (or the default).
-fn terminal_size(events: &[CastEvent]) -> Size {
+/// The terminal size a session rendered at: the last valid `r` (resize)
+/// cast event wins; otherwise the fallback (recorded initial size, cast
+/// header, or the 120x30 default) is used.
+fn terminal_size(events: &[CastEvent], fallback: &Size) -> Size {
     for ev in events.iter().rev() {
         if ev.ty == "r"
             && let Some((c, r)) = parse_resize(&ev.data)
         {
             return Size { cols: c, rows: r };
         }
+    }
+    *fallback
+}
+
+/// The session's initial terminal size: the `SessionStart` event in
+/// events.jsonl when present (native recordings), else the cast header
+/// (imported casts), else the built-in default.
+fn fallback_size(session: &Session, events: &[Event]) -> Size {
+    for ev in events {
+        if let Event::SessionStart { size, .. } = ev {
+            return *size;
+        }
+    }
+    if let Ok(cast_text) = session.read_cast_text()
+        && let Some(sz) = parse_cast_header_size(&cast_text)
+    {
+        return sz;
     }
     Size::default()
 }
@@ -588,7 +631,8 @@ mod tests {
 
     #[test]
     fn terminal_size_defaults() {
-        assert_eq!(terminal_size(&[]), Size::default());
+        let fb = Size::default();
+        assert_eq!(terminal_size(&[], &fb), fb);
     }
 
     #[test]
@@ -681,10 +725,26 @@ mod tests {
             CastEvent { t: 2.0, ty: "r".into(), data: "not-a-size".into() },
         ];
         // The last *valid* resize wins; later bad ones are ignored.
-        assert_eq!(terminal_size(&evs), Size { cols: 100, rows: 30 });
-        // Only bad resizes -> default.
+        let fallback = Size::default();
+        assert_eq!(terminal_size(&evs, &fallback), Size { cols: 100, rows: 30 });
+        // Only bad resizes -> the fallback (recorded/header size) is used.
         let bad = vec![CastEvent { t: 0.0, ty: "r".into(), data: "x".into() }];
-        assert_eq!(terminal_size(&bad), Size::default());
+        let recorded = Size { cols: 80, rows: 24 };
+        assert_eq!(terminal_size(&bad, &recorded), recorded);
+    }
+
+    #[test]
+    fn terminal_size_uses_fallback_when_no_resize_events() {
+        let evs = vec![CastEvent { t: 0.5, ty: "o".into(), data: "hi".into() }];
+        let recorded = Size { cols: 40, rows: 8 };
+        assert_eq!(terminal_size(&evs, &recorded), recorded);
+    }
+
+    #[test]
+    fn min_playback_only_floors_degenerate_sessions() {
+        assert_eq!(min_playback(0.0), 1.0);
+        assert_eq!(min_playback(0.3), 0.3);
+        assert_eq!(min_playback(120.0), 120.0);
     }
 
     #[test]

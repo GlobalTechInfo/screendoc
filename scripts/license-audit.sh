@@ -40,7 +40,7 @@ m = json.loads(subprocess.check_output(
 pkgs = m["packages"]
 direct = set(f'{p["name"]} {p["version"]}' for p in pkgs if not p.get("source"))
 
-allow = set("""MIT Apache-2.0 Apache-1.1 BSD-2-Clause BSD-3-Clause ISC Unicode-3.0 Unicode-DFS-2016 Zlib CC0-1.0 MPL-2.0 NCSA Unlicense""".split())
+allow = set("MIT Apache-2.0 Unicode-3.0 BSD-2-Clause BSD-3-Clause Zlib CC0-1.0 MPL-2.0 NCSA Unlicense".split())
 
 print("| package | version | license | kind |")
 print("|---------|---------|---------|------|")

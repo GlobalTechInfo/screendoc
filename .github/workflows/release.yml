@@ -7,6 +7,11 @@ on:
 
 permissions:
   contents: read
+  # SLSA provenance attestation (actions/attest-build-provenance) mints OIDC
+  # tokens for the Sigstore identity system, and persists the result via the
+  # attestations REST API, which the GITHUB_TOKEN must be able to write.
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -67,6 +72,7 @@ jobs:
           esac
 
       - name: Package (unix)
+        id: package-unix
         if: runner.os != 'Windows'
         run: |
           BIN=target/${{ matrix.target }}/release/screendoc
@@ -75,8 +81,10 @@ jobs:
           cp LICENSE pkg/screendoc/
           (cd pkg && tar czf ../${{ matrix.artifact }} screendoc)
           sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          echo "sha256=$(sha256sum ${{ matrix.artifact }} | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Package (windows)
+        id: package-windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -87,6 +95,7 @@ jobs:
           Set-Content -Path "$env:Artifacts.sha256" -Value (
             ("{0}  {1}" -f (Get-FileHash $env:Artifacts).Hash.ToLower(), [IO.Path]::GetFileName($env:Artifacts))
           )
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "sha256=$((Get-FileHash $env:Artifacts).Hash.ToLower())"
         env:
           Artifacts: ${{ github.workspace }}/${{ matrix.artifact }}
 
@@ -97,6 +106,18 @@ jobs:
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
+
+      # SLSA provenance: the attestation is bound to the artifact's exact
+      # bytes (sha256 digest) and published alongside it; `gh attestation
+      # verify` / Sigstore consumers can check WHO built WHAT and on WHICH
+      # runner without trusting the release uploader.
+      # Only one of package-unix / package-windows runs per matrix entry
+      # (the other is skipped), so coalesce the two output slots.
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ matrix.artifact }}
+          subject-digest: sha256:${{ steps.package-unix.outputs.sha256 || steps.package-windows.outputs.sha256 }}
 
   static-musl:
     # Fully-static Linux binaries (no glibc dependency), for 64-bit and
@@ -150,11 +171,13 @@ jobs:
           fi
           echo "OK: $BIN is fully static (no PT_INTERP segment)"
       - name: Package
+        id: package
         run: |
           mkdir -p pkg/screendoc-static
           cp target/${{ matrix.target }}/release/screendoc pkg/screendoc-static/
           (cd pkg && tar czf ../${{ matrix.artifact }} screendoc-static)
           sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          echo "sha256=$(sha256sum ${{ matrix.artifact }} | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -162,12 +185,114 @@ jobs:
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ matrix.artifact }}
+          subject-digest: sha256:${{ steps.package.outputs.sha256 }}
+
+  distro:
+    needs: [build, static-musl]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Four distro packages, one per supported Linux arch:
+          #   x86_64/aarch64 wrap the gnu (dynamic) tarballs;
+          #   i686/armv7 wrap the fully-static musl tarballs (no 32-bit
+          #   glibc distros exist on the runners, and static musl is the
+          #   portable option there). Static packages carry no Depends:
+          #   the binary is self-contained (ffmpeg stays an optional
+          #   runtime tool, as with the tarballs).
+          - arch: x86_64
+            artifact: screendoc-x86_64-unknown-linux-gnu.tar.gz
+            deb_arch: amd64
+            depends: "bash, ffmpeg"
+          - arch: aarch64
+            artifact: screendoc-aarch64-unknown-linux-gnu.tar.gz
+            deb_arch: arm64
+            depends: "bash, ffmpeg"
+          - arch: i686
+            artifact: screendoc-i686-linux-musl.tar.gz
+            deb_arch: i386
+            depends: ""
+          - arch: armv7
+            artifact: screendoc-armv7-linux-musleabihf.tar.gz
+            deb_arch: armhf
+            depends: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the ${{ matrix.arch }} tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+
+      - name: Build .deb and .rpm packages
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          NAME=screendoc
+          ARCH=${{ matrix.arch }}
+          TARBALL=$(find dist -name "${{ matrix.artifact }}")
+          echo "packaging ${TARBALL} at v${VERSION} for ${ARCH}"
+
+          # --- .deb (dpkg-deb is preinstalled on the ubuntu runner) ---
+          PKG=${NAME}-${VERSION}-${ARCH}-linux-deb
+          mkdir -p "pkg/${PKG}/DEBIAN" "pkg/${PKG}/usr/local/bin"
+          BIN=$(tar tzf "$TARBALL" | grep '/screendoc$' | head -1)
+          test -n "$BIN"
+          # Extract into usr/local/bin so the package installs
+          # /usr/local/bin/screendoc, not /screendoc (the tarball's
+          # top-level dir is stripped).
+          tar xzf "$TARBALL" -C "pkg/${PKG}/usr/local/bin" --strip-components=1
+          rm -f "pkg/${PKG}/usr/local/bin/LICENSE"
+          {
+            printf '%s\n' \
+              "Package: ${NAME}" \
+              "Version: ${VERSION}" \
+              "Section: utils" \
+              "Priority: optional" \
+              "Architecture: ${{ matrix.deb_arch }}" \
+              "Maintainer: ${NAME} Contributors"
+            [ -n "${{ matrix.depends }}" ] && echo "Depends: ${{ matrix.depends }}"
+            printf '%s\n' \
+              "Description: Record terminal sessions and render them to GIF/MP4/WebM" \
+              " ${NAME} records a command, a running shell, or tmux panes as an" \
+              " asciinema-compatible event journal (raw byte stream plus command and" \
+              " chapter markers) and renders it to GIF, MP4, WebM/AV1, still PNGs," \
+              " and a self-contained HTML player."
+          } > "pkg/${PKG}/DEBIAN/control"
+          dpkg-deb --root-owner-group -b "pkg/${PKG}" "${NAME}-${VERSION}-${ARCH}-linux.deb"
+          dpkg-deb --info "${NAME}-${VERSION}-${ARCH}-linux.deb"
+
+          # --- .rpm (alien converts the verified .deb; output lands in CWD) ---
+          sudo apt-get update -y
+          sudo apt-get install -y alien
+          alien -r "${NAME}-${VERSION}-${ARCH}-linux.deb"
+          RPM=$(ls "${NAME}"-*.rpm)
+          echo "built ${NAME}-${VERSION}-${ARCH}-linux.deb and ${RPM}"
+          mv "${NAME}-${VERSION}-${ARCH}-linux.deb" dist/
+          mv "$RPM" "dist/${NAME}-${VERSION}-${ARCH}-linux.rpm"
+
+      - name: Upload distro artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: distro-${{ matrix.arch }}
+          path: |
+            dist/screendoc-*-${{ matrix.arch }}-linux.deb
+            dist/screendoc-*-${{ matrix.arch }}-linux.rpm
 
   publish:
-    needs: [build, static-musl]
+    needs: [build, static-musl, distro]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # The backfill step opens a self-merging PR (main's ruleset forbids
+      # direct bot commits); creating + scheduling it needs this.
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
 
@@ -182,8 +307,19 @@ jobs:
           # The release's public signing key ships as an asset so anyone
           # can verify the artifacts without needing the repo.
           cp PGP-KEY.asc release/
-          (cd release && sha256sum *.tar.gz *.zip > SHA256SUMS)
+          (cd release && sha256sum *.tar.gz *.zip *.deb *.rpm > SHA256SUMS)
           for f in release/*; do echo "  - $f"; done
+
+      - name: Generate SBOM (CycloneDX 1.6)
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cargo-sbom --version 0.10.0
+          cargo +stable sbom --output-format cyclone_dx_json_1_6 > release/SBOM.json
+          python3 -c 'import json; d=json.load(open("release/SBOM.json")); print("OK: SBOM spec", d["specVersion"], "components:", len(d.get("components", [])))'
+          cd release && sha256sum SBOM.json >> SHA256SUMS
+        env:
+          CARGO_TERM_COLOR: always
 
       # Enterprise supply-chain control: when the repo secret
       # SDOC_RELEASE_SIGNING_KEY (private GPG key) is configured, every
@@ -202,11 +338,11 @@ jobs:
           # signature fails verification (reproduced locally with gpg 2.4.8).
           # Sign each file explicitly in a loop instead, armored, and
           # self-verify every signature before publishing.
-          for f in *.tar.gz *.zip SHA256SUMS; do
+          for f in *.tar.gz *.zip *.deb *.rpm SHA256SUMS; do
             gpg --batch --yes --pinentry-mode loopback --armor --digest-algo SHA512 \
               --detach-sign "$f"
           done
-          for f in *.tar.gz *.zip SHA256SUMS; do
+          for f in *.tar.gz *.zip *.deb *.rpm SHA256SUMS; do
             gpg --batch --verify "$f.asc" "$f"
           done
           ls *.asc
@@ -250,5 +386,119 @@ jobs:
             echo "uploaded ${f}"
           done
           gh api --jq .html_url "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+       # The in-repo formula at tag time always points at the PREVIOUS release
+       # (one-release-behind invariant). After publishing, backfill main with
+       # the version + checksums just released so `brew install` tracks the
+       # newest tag. main's ruleset forbids direct bot commits, so the
+       # backfill lands as a self-merging PR (auto-merged once its CI is
+       # green).
+      - name: Backfill the homebrew formula on main
+        # The release assets are fully published by the step above, so a
+        # backfill hiccup (e.g. the repo blocking bot PR creation) must never
+        # fail the release run: the step warns and leaves the PR/branch for a
+        # maintainer.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          sha() { awk '{print $1}' "release/$1.sha256"; }
+          DARWIN_ARM_SHA=$(sha screendoc-aarch64-apple-darwin.tar.gz)
+          DARWIN_X86_SHA=$(sha screendoc-x86_64-apple-darwin.tar.gz)
+          LINUX_ARM_SHA=$(sha screendoc-aarch64-unknown-linux-gnu.tar.gz)
+          LINUX_X86_SHA=$(sha screendoc-x86_64-unknown-linux-gnu.tar.gz)
+          printf '%s\n' \
+            'class Screendoc < Formula' \
+            '  desc "Record your terminal and publish it as GIF, MP4, asciinema cast, and web player"' \
+            '  homepage "https://github.com/GlobalTechInfo/screendoc"' \
+            '  # Keep this in sync with the latest release. The release' \
+            '  # workflow backfills this file on main after every tagged' \
+            '  # release, so the formula on main is always one release' \
+            '  # behind the newest tag.' \
+            "  version \"${VERSION}\"" \
+            '' \
+            '  livecheck do' \
+            '    url "https://api.github.com/repos/GlobalTechInfo/screendoc/releases/latest"' \
+            '    regex(/v?([0-9]+\.[0-9]+\.[0-9]+)/i)' \
+            '  end' \
+            '' \
+            '  on_macos do' \
+            '    if Hardware::CPU.arm?' \
+            "      url \"https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-aarch64-apple-darwin.tar.gz\"" \
+            "      sha256 \"${DARWIN_ARM_SHA}\"" \
+            '    else' \
+            "      url \"https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-x86_64-apple-darwin.tar.gz\"" \
+            "      sha256 \"${DARWIN_X86_SHA}\"" \
+            '    end' \
+            '  end' \
+            '' \
+            '  on_linux do' \
+            '    if Hardware::CPU.aarch64?' \
+            "      url \"https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-aarch64-unknown-linux-gnu.tar.gz\"" \
+            "      sha256 \"${LINUX_ARM_SHA}\"" \
+            '    else' \
+            "      url \"https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-x86_64-unknown-linux-gnu.tar.gz\"" \
+            "      sha256 \"${LINUX_X86_SHA}\"" \
+            '    end' \
+            '  end' \
+            '' \
+            '  def install' \
+            '    bin.install "screendoc"' \
+            '  end' \
+            '' \
+           '  test do' \
+             '    system "#{bin}/screendoc", "--version"' \
+             '  end' \
+             'end' > /tmp/formula.rb
+           CURRENT_SHA=$(gh api --jq '.sha // empty' \
+             "repos/${GITHUB_REPOSITORY}/contents/packaging/homebrew/screendoc.rb?ref=main" || true)
+           CURRENT_B64=$(gh api --jq '.content // empty' \
+             "repos/${GITHUB_REPOSITORY}/contents/packaging/homebrew/screendoc.rb?ref=main" || true)
+           if [ -n "$CURRENT_B64" ] && \
+              [ "$(printf '%s' "$CURRENT_B64" | tr -d '\n' | base64 -d)" = "$(cat /tmp/formula.rb)" ]; then
+             echo "Formula on main already matches ${TAG}; skipping backfill."
+             exit 0
+           fi
+            # Push a one-release branch and open (or reuse) a backfill PR: the
+            # repo's main-branch ruleset rejects direct bot commits (contents
+            # API => 409 "Repository rule violations found"). A PR with green
+            # CI is mergeable; auto-merge is scheduled when the repo allows
+            # it, otherwise the PR is left open for a maintainer. The step is
+            # best-effort (continue-on-error) so a backfill hiccup never
+            # fails an already-published release.
+            BRANCH="chore/homebrew-formula-${TAG}"
+            # Commit as the repository owner, never as the Actions bot: the
+            # backfill PR must carry a GlobalTechInfo-only commit identity.
+            git config user.name "GlobalTechInfo"
+            git config user.email "166284738+GlobalTechInfo@users.noreply.github.com"
+           git fetch origin main
+           git checkout -B "$BRANCH" origin/main
+           cp /tmp/formula.rb packaging/homebrew/screendoc.rb
+           git add packaging/homebrew/screendoc.rb
+           git commit -m "chore(formula): backfill homebrew formula to ${TAG}"
+           git push -f origin "$BRANCH"
+            # Open (or reuse) the backfill PR and schedule a self-merge. Both
+            # are best-effort: this repo blocks the Actions bot from creating
+            # PRs and has auto-merge disabled, so on failure we warn with the
+            # exact manual command and leave the run green (assets already
+            # published) — the formula lands on main when the PR is merged.
+             PRNUM="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number -q '.[0].number // empty' 2>/dev/null || true)"
+            if [ -z "$PRNUM" ]; then
+              PRURL="$(gh pr create --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main \
+                --title "chore(formula): backfill homebrew formula to ${TAG}" \
+                --body "Auto-generated by the ${TAG} release: pins the Homebrew formula to ${VERSION} with the release's live SHA-256 checksums. Merges once CI is green." \
+                2>/dev/null || true)"
+              PRNUM="${PRURL##*/}"
+            fi
+            if [ -z "$PRNUM" ]; then
+              echo "::warning::Backfill PR for ${TAG} could not be opened (the repo blocks the Actions bot from creating PRs). Open it manually to land the formula on main: https://github.com/${GITHUB_REPOSITORY}/compare/main...${BRANCH}?expand=1"
+              exit 0
+            fi
+            gh pr merge --repo "$GITHUB_REPOSITORY" "$PRNUM" --auto --squash 2>/dev/null \
+              || echo "::warning::Backfill PR #${PRNUM} is open but auto-merge is unavailable in this repo. Merge it once CI is green (or enable 'Allow auto-merge for pull requests'): https://github.com/${GITHUB_REPOSITORY}/pull/${PRNUM}"
+            echo "Homebrew formula backfill for ${TAG} on PR #${PRNUM} (auto-merge scheduled where permitted)."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -25,3 +25,5 @@ fuzz/Cargo.lock
 /*.html
 # static build output
 dist/screendoc-*
+# Pages staging dir (docs + rustdoc api/), built by .github/workflows/docs.yml
+site/

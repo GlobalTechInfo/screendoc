@@ -8,7 +8,7 @@ journal, with command boundaries, exit codes, and chapters.
 [![CI](https://github.com/GlobalTechInfo/screendoc/actions/workflows/ci.yml/badge.svg)](https://github.com/GlobalTechInfo/screendoc/actions/workflows/ci.yml)
 [![Fuzz](https://github.com/GlobalTechInfo/screendoc/actions/workflows/fuzz.yml/badge.svg)](https://github.com/GlobalTechInfo/screendoc/actions/workflows/fuzz.yml)
 [![Release](https://img.shields.io/github/v/release/GlobalTechInfo/screendoc)](https://github.com/GlobalTechInfo/screendoc/releases)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache-2.0-blue.svg)](https://github.com/GlobalTechInfo/screendoc/blob/main/LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache%202.0-blue.svg)](https://github.com/GlobalTechInfo/screendoc/blob/main/LICENSE)
 
 ```
 $ screendoc record cargo test
@@ -84,13 +84,35 @@ screendoc doctor               # verify ffmpeg/tmux/shell/data dir
 No glibc? Build a fully-static Linux binary: `./scripts/build-static.sh`
 (musl). Uninstall: `scripts/uninstall.sh [--purge]` /
 `scripts\uninstall.ps1 [-Purge]` (data in `~/.screendoc` is kept unless
-you purge). Packages: homebrew formula in `packaging/`, GitHub releases
-(Linux gnu x86_64/aarch64 + static musl x86_64/i686/armv7/aarch64 (Termux),
-macOS, Windows; SHA-256 checksums, GPG-signed) cut by
-`scripts/release.sh <version>` / the tag-triggered workflow. Verify a
-release with [`PGP-KEY.asc`](PGP-KEY.asc) (fingerprint
+you purge). Packages: a Homebrew formula in `packaging/` (auto-backfilled
+by the release workflow after every tag), Debian/RPM
+packages (Linux x86_64/aarch64/i686/armv7 — i686/armv7 are fully-static,
+dependency-free builds), GitHub releases (Linux gnu x86_64/aarch64 +
+static musl x86_64/i686/armv7/aarch64 (Termux), macOS, Windows;
+SHA-256 checksums, GPG-signed, SLSA provenance attestations) cut by
+`scripts/release.sh <version>` / the tag-triggered workflow. Distro
+packages:
+
+```sh
+brew install ./packaging/homebrew/screendoc.rb                # Homebrew (macOS / Linux)
+sudo apt install ./screendoc_<ver>-x86_64-linux.deb           # Debian / Ubuntu (amd64)
+sudo apt install ./screendoc_<ver>-aarch64-linux.deb         # Debian / Ubuntu (arm64)
+sudo apt install ./screendoc_<ver>-i686-linux.deb             # 32-bit (static, dep-free)
+sudo apt install ./screendoc_<ver>-armv7-linux.deb           # ARMv7 (static, dep-free)
+sudo rpm -i screendoc-<ver>-x86_64-linux.rpm                 # RHEL / Fedora (x86_64)
+sudo rpm -i screendoc-<ver>-aarch64-linux.rpm                # RHEL / Fedora (aarch64)
+sudo rpm -i screendoc-<ver>-i686-linux.rpm                   # 32-bit (static, dep-free)
+sudo rpm -i screendoc-<ver>-armv7-linux.rpm                  # ARMv7 (static, dep-free)
+```
+
+Verify release provenance with Sigstore:
+`gh attestation list --repo GlobalTechInfo/screendoc` then
+`gh attestation verify <artifact> --repo GlobalTechInfo/screendoc`.
+Verify a release with [`PGP-KEY.asc`](PGP-KEY.asc) (fingerprint
 `ADE1CFE02922679A2DE57563AE472669ED78D899` — see
-[SECURITY.md](SECURITY.md#verifying-release-artifacts)).
+[SECURITY.md](SECURITY.md#verifying-release-artifacts)). The workspace's
+library crates (`sdoc-core`, `sdoc-render`, `sdoc-record`) are published
+to crates.io so the pipeline can be embedded in other tools.
 
 ### Platform support
 
@@ -228,8 +250,18 @@ encryption), `sdoc-record` (pty wrapper, hooks, tmux), `sdoc-render`
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
+cargo bench -p sdoc-core -p sdoc-render     # criterion micro-benchmarks
+./examples/run-all.sh                      # end-to-end examples, CI-driven
 scripts/ci-local.sh        # the whole CI pipeline, locally
 ```
+
+Examples: `examples/` — record-and-render, chapters + redaction, local web
+serving, encrypted recording, each verifiable end-to-end in a sandboxed
+home (also a CI job). Benchmarks: `benches/` (criterion) over rule
+masking, marker reading, cast parsing, and idle compression.
+Documentation: [docs/design.md](docs/design.md),
+[docs/user-guide.md](docs/user-guide.md),
+[docs/threat-model.md](docs/threat-model.md).
 
 Contributors: read [CONTRIBUTING.md](CONTRIBUTING.md) for the house rules
 (pinned deps, zero `#[allow]`, every behavior tested). Reports:

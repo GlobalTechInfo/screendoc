@@ -4,6 +4,157 @@ All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-11-19
+
+### Fixed
+
+- **tmux sessions could export a blank cast (and render a blank video) when the
+  recorder was killed or stopped from a separate process.** The tmux recorder's
+  cast writer buffered all output until finalization, so a SIGKILLed recorder
+  left `raw.cast` empty while `raw.bin` (written by `tmux pipe-pane`) had the
+  content. Cast writes are now flushed incrementally (header + each demuxed
+  output chunk), so a killed or externally-stopped recorder still leaves a
+  usable cast. Regression test:
+  `tmux_dropped_recorder_still_persists_cast`.
+- **Encrypted sessions leaked the command into plaintext `meta.json`.**
+  `record --encrypt` stored the recorded command as the session title,
+  defeating at-rest encryption. The title is now omitted for encrypted
+  sessions. Regression tests:
+  `encrypted_wrapper_meta_omits_command_title` /
+  `unencrypted_wrapper_meta_keeps_title`.
+
+### Changed
+
+- Font rasterizer backend: rusttype 0.9.3 (pinned, unmaintained —
+  RUSTSEC-2021-0140) → ab_glyph 0.2.32 (maintained), glyph metrics via
+  ab_glyph's ScaleFont/PxScaleFont API. The transitive ttf-parser 0.25.1
+  (RUSTSEC-2026-0192, author EOL; skrifa is the tracked alternative for the
+  next major) is documented in `deny.toml [advisories]`.
+- Cargo-deny gate finalized: `[advisories] ignore` for RUSTSEC-2024-0436
+  (paste, dev-only, no safe upgrade) and RUSTSEC-2026-0192; `[licenses]`
+  allow-list synced with the lockfile (Unicode-3.0 re-added for the icu
+  unicode stack, unmatched Apache-1.1/ISC/Unicode-DFS-2016 dropped);
+  `scripts/license-audit.sh` allow-list synced; `docs/LICENSES.md`
+  regenerated.
+- E2E suite hardened: 4 new negative-path tests (`serve_no_session`,
+  `redact_rejects_invalid_regex`, `stop_rejects_unknown_id`,
+  `rm_rejects_unknown_id`) and the tmux-group test reworked to let the
+  group finalize on pane death; 192 tests, 0 failed.
+- Release workflow: the homebrew formula backfill now commits as the owner
+  identity (GlobalTechInfo author + committer) instead of the
+  `github-actions[bot]` identity, so backfill PRs carry a
+  GlobalTechInfo-only commit lineage.
+- README: license badge uses an unambiguous three-segment shields.io URL.
+
+## [0.4.2] - 2026-11-18
+
+### Added
+
+- **Multi-arch distro packages**: the release now ships .deb/.rpm for all
+  supported Linux architectures — `screendoc-<ver>-{x86_64,aarch64}-linux.{deb,rpm}`
+  (dynamic gnu builds, `Depends: bash, ffmpeg`) and
+  `screendoc-<ver>-{i686,armv7}-linux.{deb,rpm}` (fully-static musl builds,
+  no runtime dependencies). 32-bit/ARMv7 have no glibc distros on the
+  release runners, so they wrap the portable static tarballs; aarch64 wraps
+  the dynamic build (its static variant stays available as a tarball).
+
+### Fixed
+
+- **Homebrew formula staleness**: `packaging/homebrew/screendoc.rb` had
+  been frozen at v0.1.0 with `sha256 "TODO"` placeholders, so it was
+  unusable via Homebrew. Backfilled to v0.4.1 with real checksums and a
+  livecheck block.
+- **Formula auto-maintenance**: the release workflow now regenerates
+  the formula on `main` after every tagged release (version + checksums
+  from the release's `.sha256` assets, committed via the contents API),
+  so `brew install` always tracks the newest release.
+
+### Changed
+
+- README: Homebrew install instructions (from the in-repo formula) and
+  note that the formula is auto-backfilled by the release workflow.
+- Distro package naming now includes the architecture:
+  `screendoc-<ver>-{x86_64,aarch64,i686,armv7}-linux.{deb,rpm}`.
+
+## [0.4.1] - 2026-11-18
+
+### Fixed
+
+- **deb/rpm package layout** (v0.4.0 shipped- bug): the distro job
+  extracted the release tarball into the package root, so the .deb/.rpm
+  installed the binary at `/screendoc` (filesystem root) with an empty
+  `/usr/local/bin/` directory. Now extracted straight into
+  `usr/local/bin/` → packages install `/usr/local/bin/screendoc` with
+  no stray files.
+
+## [0.4.0] - 2026-11-18
+
+### Added
+
+- **Supply-chain provenance**: every release artifact is attested with
+  SLSA v1 provenance (Sigstore `actions/attest-build-provenance`), so
+  downstream users can verify `which CI job built this binary` without
+  trusting the release page.
+- **Debian and RPM packages** (`screendoc-*-x86_64-linux.deb` /
+  `.rpm`) ship alongside the tarballs; the release checksums, GPG
+  signatures and the installer all cover them.
+- **Published library crates**: `sdoc-core`, `sdoc-render` and
+  `sdoc-record` are now publishable on crates.io (per-crate READMEs and
+  LICENSE files included) for embedding the pipeline in other tools; the
+  CLI crate stays private.
+- **Rust API reference on GitHub Pages** (the docs site now builds
+  `cargo doc` and serves it under `/api/`), plus a CI `doc` job that
+  fails on any rustdoc warning or unresolved intra-doc link.
+  (Fixed two broken intra-doc links found by that gate.)
+
+## [0.3.0] - 2026-11-17
+
+### Fixed
+
+- **Encrypted session journals are now readable after decryption.**
+  `record --encrypt` stored each event-log and marker-log record without a
+  line terminator, so a session with more than one event decrypted to a
+  single concatenated line and failed to parse (`json error: trailing
+  characters`). Every record now carries its own newline; covered by a
+  unit round-trip and the encrypted e2e test.
+
+### Added
+
+- **Runnable examples** (`examples/`, driven by CI): record-and-render,
+  chapters + redaction, local web serving, and encrypted recording — each
+  end-to-end verifiable in a sandboxed home directory.
+- **Criterion micro-benchmarks** for the hot paths (rule masking, marker
+  reading, cast parsing, idle compression) with a fast-mode CI job.
+- **Documentation**: `docs/design.md` (architecture, data model,
+  marker demux, render pipeline, encryption), `docs/user-guide.md`, and
+  `docs/threat-model.md` (T1–T6 with mitigations and residual risk).
+- **CI hardening**: MSRV job (Rust 1.99 `cargo check`), line-coverage
+  gate (`cargo-llvm-cov`, `--fail-under-lines 70`), unused-dependency
+  audit on nightly, and dedicated `examples` and `bench` jobs.
+
+## [0.2.0] - 2026-11-17
+
+### Fixed
+
+- **Recorded terminal size now drives every raster render** (video, GIF,
+  stills, chapters). Previously the cast header's `terminal_width`/
+  `terminal_height` was dropped, so an 80x24 session rendered at the 120x30
+  default. The session start size and the cast header are now honored as
+  fallbacks, with explicit resize events still taking precedence.
+- **Empty recordings render a minimum-length video instead of an
+  unplayable single-frame artifact.** A session that captured no terminal
+  output (e.g. `screendoc record true`) now yields a short, playable clip
+  instead of a 1-frame 0.07 s GIF/MP4, and `record` reports it with a
+  warning so the degenerate case is no longer silent.
+
+### Added
+
+- Release pipeline ships a **CycloneDX 1.6 SBOM** (`SBOM.json`) alongside
+  the binary artifacts, signed and digested like the rest of the release.
+- End-to-end regression coverage: render tests now assert GIF frame counts
+  and output dimensions, including the recorded-size and empty-session
+  cases that produced the defects above.
+
 ## [0.1.0] - 2026-11-11
 
 First release.

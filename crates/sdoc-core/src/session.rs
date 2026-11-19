@@ -224,7 +224,7 @@ impl Session {
             let key = self.key()?;
             let mut f =
                 fs::OpenOptions::new().create(true).append(true).open(self.events_path())?;
-            key.append_record(&mut f, line.as_bytes())?;
+            key.append_record(&mut f, format!("{line}\n").as_bytes())?;
         } else {
             let mut f =
                 fs::OpenOptions::new().create(true).append(true).open(self.events_path())?;
@@ -242,7 +242,7 @@ impl Session {
             let key = self.key()?;
             let mut f =
                 fs::OpenOptions::new().create(true).append(true).open(self.markers_path())?;
-            key.append_record(&mut f, line.as_bytes())?;
+            key.append_record(&mut f, format!("{line}\n").as_bytes())?;
         } else {
             let mut f =
                 fs::OpenOptions::new().create(true).append(true).open(self.markers_path())?;
@@ -520,6 +520,35 @@ mod tests {
         })?;
 
         assert_eq!(s.read_events()?, vec![ev]);
+        assert_eq!(s.read_marker_records()?.len(), 1);
+        s.remove()?;
+        Ok(())
+    }
+
+    #[test]
+    fn encrypted_event_and_marker_roundtrip() -> Result<()> {
+        let meta = test_meta();
+        let s = Session::create_encrypted(&meta)?;
+        let ev1 = Event::Chapter {
+            at_ms: 42,
+            title: "x".into(),
+            source: crate::event::ChapterSource::Manual,
+        };
+        let ev2 = Event::Chapter {
+            at_ms: 43,
+            title: "y".into(),
+            source: crate::event::ChapterSource::Manual,
+        };
+        s.append_event(&ev1)?;
+        s.append_event(&ev2)?;
+        s.append_marker_record(&MarkerRecord {
+            ts_unix_ms: now_unix_ms(),
+            marker: Marker::Chapter { title: "z".into() },
+        })?;
+
+        // Regression: each record must keep its own line so the decrypted
+        // log still parses one JSON value per line.
+        assert_eq!(s.read_events()?, vec![ev1, ev2]);
         assert_eq!(s.read_marker_records()?.len(), 1);
         s.remove()?;
         Ok(())
