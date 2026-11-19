@@ -5,7 +5,7 @@ class Screendoc < Formula
   # workflow backfills this file on main after every tagged
   # release, so the formula on main is always one release
   # behind the newest tag.
-  version "0.4.2"
+  version "0.4.3"
 
   livecheck do
     url "https://api.github.com/repos/GlobalTechInfo/screendoc/releases/latest"
@@ -15,20 +15,20 @@ class Screendoc < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-aarch64-apple-darwin.tar.gz"
-      sha256 "26f55adbde98eb6071828da836cd515fa1ae1362a4e072ad8f73233612fa289c"
+      sha256 "3c25600c9849321b4721dcf8393ee8d8b0d78f3130e26dda3d0b6c95fedff629"
     else
       url "https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-x86_64-apple-darwin.tar.gz"
-      sha256 "319dc54f21b384397c3cde2585068bda8fb74edd6fe0040ca9f4271caf9cb519"
+      sha256 "b696fb3dec4c796886115687394f726505cf10c890c5a7a4d1cf209c950e0177"
     end
   end
 
   on_linux do
     if Hardware::CPU.aarch64?
       url "https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "0ce11d1fdc0d1da91cce63f61ccba65be8766f2ac480c1f22530c6a15a03bb76"
+      sha256 "46fe500e052aacde6f0dab3e7633f2df4f122db725c10f4435f50578610d0fa9"
     else
       url "https://github.com/GlobalTechInfo/screendoc/releases/download/v#{version}/screendoc-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "fc7b74f9f6a2d67ba0afe3ce219359fd366245837d9a99d66e32146fe31417a1"
+      sha256 "7eff6c25b0158029c8d9d2094f7d36abe028692e43a7f72bd53eb2cb1945a753"
     end
   end
 
