@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Release workflow: the homebrew formula backfill now commits as the owner
+  identity (GlobalTechInfo author + committer) instead of the
+  `github-actions[bot]` identity, so backfill PRs carry a
+  GlobalTechInfo-only commit lineage.
+- README: license badge uses an unambiguous three-segment shields.io URL.
+
 ## [0.4.2] - 2026-11-18
 
 ### Added
