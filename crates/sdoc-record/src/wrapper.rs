@@ -70,7 +70,7 @@ fn run_wrapper_pty(opts: &WrapperOptions) -> Result<WrapperSummary> {
         video: true,
         pane_target: None,
         duration_ms: None,
-        title: opts.command.first().cloned(),
+        title: if opts.encrypt { None } else { opts.command.first().cloned() },
         group: None,
     };
     let session =
@@ -206,7 +206,7 @@ fn run_wrapper_pipes(opts: &WrapperOptions) -> Result<WrapperSummary> {
         video: true,
         pane_target: None,
         duration_ms: None,
-        title: opts.command.first().cloned(),
+        title: if opts.encrypt { None } else { opts.command.first().cloned() },
         group: None,
     };
     let session =

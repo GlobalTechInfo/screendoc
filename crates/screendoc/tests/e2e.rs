@@ -805,6 +805,48 @@ fn tmux_stop_after_pane_death_still_finalizes() {
     cleanup(&[id]);
 }
 
+/// A tmux recorder that dies before `stop()` (a separate-terminal
+/// `screendoc stop` + a killed process) must still leave a usable cast
+/// on disk — regression: the cast writer only flushed at finalization,
+/// so a killed recorder left `raw.cast` empty and blank video.
+#[test]
+fn tmux_dropped_recorder_still_persists_cast() {
+    let _g = lock();
+    if !sdoc_record::tmux::tmux_available() {
+        eprintln!("SKIP: tmux not installed");
+        return;
+    }
+    let name = format!("sdoc-drop-{}", std::process::id());
+    let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &name]).status();
+    let _ = std::process::Command::new("tmux")
+        .args(["new-session", "-d", "-s", &name, "-x", "50", "-y", "10", "bash"])
+        .status();
+    std::thread::sleep(std::time::Duration::from_millis(400));
+
+    let mut rec = sdoc_record::tmux::start(Some(&name), false).expect("start");
+    let id = rec.id().to_string();
+    let _ = std::process::Command::new("tmux")
+        .args(["send-keys", "-t", &name, "echo killed-recorder-check", "Enter"])
+        .status();
+    for _ in 0..5 {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let _ = rec.poll();
+    }
+    // Simulate SIGKILL: the recorder dies without stop(), so cast.finish()
+    // never runs and any unflushed buffer is lost.
+    std::mem::forget(rec);
+    let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &name]).status();
+
+    let s = Session::open(&id).expect("open");
+    let bytes = std::fs::read(s.cast_path()).expect("cast bytes on disk");
+    assert!(!bytes.is_empty(), "raw.cast must survive a killed recorder");
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("\"version\":2"), "cast header must be persisted");
+    assert!(text.contains("killed-recorder-check"), "flushed output must be persisted");
+    let _ = Session::clear_active(&id);
+    cleanup(&[id]);
+}
+
 #[test]
 fn serve_returns_404_for_unknown_routes() {
     let _g = lock();
@@ -946,6 +988,49 @@ fn encrypted_record_roundtrips() {
     let events = s.read_events().expect("events decrypt");
     assert!(!events.is_empty(), "encrypted session must have events");
 
+    cleanup(&[id]);
+}
+
+/// `record --encrypt` must not persist the command as `meta.title`:
+/// meta.json is always plaintext, so a title derived from the command
+/// would leak it at rest (regression for the encrypt-title leak).
+#[test]
+fn encrypted_wrapper_meta_omits_command_title() {
+    let _g = lock();
+    let marker = format!("entitle-{}", std::process::id());
+    // A single compound argument so `command.first()` is the whole
+    // command string — the shape that used to leak into meta.json.
+    let compound = format!("sh -c \"echo {marker}\"");
+    let session =
+        run_and_capture(&["screendoc", "record", "--size", "40x6", "--encrypt", &compound]);
+    let id = session.id().to_string();
+    let meta = session.read_meta().expect("meta");
+    assert!(
+        meta.title.is_none(),
+        "encrypted session must not persist the command as title, got {:?}",
+        meta.title
+    );
+    // The command text must not appear in the always-plaintext meta file
+    // either.
+    let meta_raw = std::fs::read(session.meta_path()).expect("meta bytes");
+    let meta_text = String::from_utf8_lossy(&meta_raw);
+    assert!(
+        !meta_text.contains(&marker),
+        "encrypted session meta.json must not contain the command"
+    );
+    cleanup(&[id]);
+}
+
+/// Non-encrypted wrapper sessions keep the first word as title by design
+/// (the session is not at-rest confidential).
+#[test]
+fn unencrypted_wrapper_meta_keeps_title() {
+    let _g = lock();
+    let session =
+        run_and_capture(&["screendoc", "record", "--size", "40x6", "echo", "ttl", "exit", "0"]);
+    let id = session.id().to_string();
+    let meta = session.read_meta().expect("meta");
+    assert_eq!(meta.title.as_deref(), Some("echo"));
     cleanup(&[id]);
 }
 

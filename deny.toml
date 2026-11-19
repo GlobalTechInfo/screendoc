@@ -47,17 +47,19 @@ skip = [
 allow = [
     "MIT",
     "Apache-2.0",
-    "Apache-1.1",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "ISC",
-    "Unicode-3.0",
-    "Unicode-DFS-2016",
     "Zlib",
     "CC0-1.0",
     "MPL-2.0",
     "NCSA",
     "Unlicense",
+    # OSI-approved Unicode License v3 — carried by 19 lockfile crates: the
+    # icu4x stack (icu_collections/icu_locale_core/icu_normalizer(+_data)/
+    # icu_properties(+_data)/icu_provider, via webbrowser→url→idna→idna_adapter),
+    # litemap, potential_utf, tinystr, writeable, yoke(+derive),
+    # zerofrom(+derive), zerotrie, zerovec(+derive) + dual-licensed unicode-ident.
+    "Unicode-3.0",
 ]
 confidence-threshold = 0.8
 
@@ -66,3 +68,23 @@ confidence-threshold = 0.8
 # supply-chain violation for this project.
 unknown-registry = "deny"
 unknown-git = "deny"
+
+[advisories]
+# Two transitive dependencies are declared unmaintained upstream but have no
+# safe upgrade available; both are pinned (exact `=` in Cargo.toml), so the
+# risk is bounded and documented here (cargo-deny 0.20.2: `[advisories]
+# ignore` is the advisory-level mechanism — there is no `exceptions` key).
+#   RUSTSEC-2024-0436 paste 1.0.15: dev-only, via image (exr/pulp) and
+#   rav1e (ravif) — never compiled into the shipped binary; RUSTSEC: "No
+#   safe upgrade is available!"
+#   RUSTSEC-2026-0192 ttf-parser 0.25.1: glyph rasterizer under ab_glyph
+#   (owned_ttf_parser). Author declared EOL; actively-maintained
+#   replacement is skrifa (Google fontations) — a larger API migration
+#   tracked for a future major version.
+ignore = [
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0192",
+]
+# Warn (not fail, not silent) if an ignored ID ever disappears from RUSTSEC,
+# so the documentation above is re-reviewed instead of silently going stale.
+unused-ignored-advisory = "warn"

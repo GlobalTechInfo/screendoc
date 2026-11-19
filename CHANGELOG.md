@@ -4,9 +4,42 @@ All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.3] - 2026-11-19
+
+### Fixed
+
+- **tmux sessions could export a blank cast (and render a blank video) when the
+  recorder was killed or stopped from a separate process.** The tmux recorder's
+  cast writer buffered all output until finalization, so a SIGKILLed recorder
+  left `raw.cast` empty while `raw.bin` (written by `tmux pipe-pane`) had the
+  content. Cast writes are now flushed incrementally (header + each demuxed
+  output chunk), so a killed or externally-stopped recorder still leaves a
+  usable cast. Regression test:
+  `tmux_dropped_recorder_still_persists_cast`.
+- **Encrypted sessions leaked the command into plaintext `meta.json`.**
+  `record --encrypt` stored the recorded command as the session title,
+  defeating at-rest encryption. The title is now omitted for encrypted
+  sessions. Regression tests:
+  `encrypted_wrapper_meta_omits_command_title` /
+  `unencrypted_wrapper_meta_keeps_title`.
 
 ### Changed
+
+- Font rasterizer backend: rusttype 0.9.3 (pinned, unmaintained —
+  RUSTSEC-2021-0140) → ab_glyph 0.2.32 (maintained), glyph metrics via
+  ab_glyph's ScaleFont/PxScaleFont API. The transitive ttf-parser 0.25.1
+  (RUSTSEC-2026-0192, author EOL; skrifa is the tracked alternative for the
+  next major) is documented in `deny.toml [advisories]`.
+- Cargo-deny gate finalized: `[advisories] ignore` for RUSTSEC-2024-0436
+  (paste, dev-only, no safe upgrade) and RUSTSEC-2026-0192; `[licenses]`
+  allow-list synced with the lockfile (Unicode-3.0 re-added for the icu
+  unicode stack, unmatched Apache-1.1/ISC/Unicode-DFS-2016 dropped);
+  `scripts/license-audit.sh` allow-list synced; `docs/LICENSES.md`
+  regenerated.
+- E2E suite hardened: 4 new negative-path tests (`serve_no_session`,
+  `redact_rejects_invalid_regex`, `stop_rejects_unknown_id`,
+  `rm_rejects_unknown_id`) and the tmux-group test reworked to let the
+  group finalize on pane death; 192 tests, 0 failed.
 - Release workflow: the homebrew formula backfill now commits as the owner
   identity (GlobalTechInfo author + committer) instead of the
   `github-actions[bot]` identity, so backfill PRs carry a

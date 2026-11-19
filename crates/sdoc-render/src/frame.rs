@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use ab_glyph::{Font, FontRef, ScaleFont, point};
 use anyhow::Result;
 use image::RgbaImage;
-use rusttype::{Font, Scale, point};
 use sdoc_core::Size;
 use vt100::{Color, Parser, Screen};
 
@@ -111,8 +111,8 @@ struct Cell {
 
 /// A terminal frame rasterizer backed by a cached glyph atlas.
 pub struct Rasterizer {
-    font: Font<'static>,
-    scale: Scale,
+    font: FontRef<'static>,
+    px: f32,
     ascent: f32,
     opts: FrameOptions,
     /// Cache of glyph coverage per character.
@@ -135,11 +135,10 @@ impl Rasterizer {
     /// Create a rasterizer for the given options.
     pub fn new(opts: FrameOptions) -> Result<Self> {
         let font =
-            Font::try_from_bytes(FONT).ok_or_else(|| anyhow::anyhow!("invalid embedded font"))?;
+            FontRef::try_from_slice(FONT).map_err(|_| anyhow::anyhow!("invalid embedded font"))?;
         let px = opts.cell_h as f32 * 0.8;
-        let scale = Scale::uniform(px);
-        let ascent = font.v_metrics(scale).ascent;
-        Ok(Self { font, scale, ascent, opts, glyphs: HashMap::new() })
+        let ascent = font.as_scaled(px).ascent();
+        Ok(Self { font, px, ascent, opts, glyphs: HashMap::new() })
     }
 
     /// Get (and lazily rasterize) the coverage mask for a character.
@@ -154,15 +153,17 @@ impl Rasterizer {
 
     /// Rasterize a single glyph into a coverage mask.
     fn rasterize_glyph(&self, ch: char) -> Option<GlyphRaster> {
-        let positioned = self.font.glyph(ch).scaled(self.scale).positioned(point(0.0, self.ascent));
-        let bb = positioned.pixel_bounding_box()?;
-        let w = (bb.max.x - bb.min.x).max(0) as u32;
-        let h = (bb.max.y - bb.min.y).max(0) as u32;
+        let glyph =
+            self.font.glyph_id(ch).with_scale_and_position(self.px, point(0.0, self.ascent));
+        let outlined = self.font.outline_glyph(glyph)?;
+        let bb = outlined.px_bounds();
+        let w = bb.width().max(0.0) as u32;
+        let h = bb.height().max(0.0) as u32;
         if w == 0 || h == 0 {
             return None;
         }
         let mut mask = vec![0u8; (w * h) as usize];
-        positioned.draw(|gx, gy, cov| {
+        outlined.draw(|gx, gy, cov| {
             if gx < w && gy < h {
                 let idx = (gy as usize) * (w as usize) + gx as usize;
                 let v = (cov * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -171,7 +172,7 @@ impl Rasterizer {
                 }
             }
         });
-        Some(GlyphRaster { x: bb.min.x, y: bb.min.y, w, mask })
+        Some(GlyphRaster { x: bb.min.x as i32, y: bb.min.y as i32, w, mask })
     }
 
     /// Rasterize the current screen into a fresh frame image.
